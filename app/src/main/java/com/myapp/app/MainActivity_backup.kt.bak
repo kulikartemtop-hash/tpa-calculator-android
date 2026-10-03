@@ -1,0 +1,1215 @@
+package com.myapp.app
+
+import android.content.Context
+import android.content.Intent
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import org.json.JSONArray
+import org.json.JSONObject
+
+private val TpaNames = (1..13).map { "ТПА $it" } + "Малыш"
+private val Materials = listOf("ПВХ серый", "ПВХ коричневый", "АБС", "PP")
+
+private const val PREFS = "tpa_premium_android"
+private const val DATA_KEY = "calculator_data"
+private const val COLLAPSED_KEY = "collapsed_data"
+private const val THEME_KEY = "dark_theme"
+private const val WALLPAPER_KEY = "wallpaper"
+private const val HISTORY_KEY = "history"
+private const val VISUAL_VERSION_KEY = "visual_version"
+
+private const val CYAN = 0xFF38BDF8
+private const val CYAN_DARK = 0xFF0EA5E9
+private const val BG_DARK_1 = 0xFF081B38
+private const val BG_DARK_2 = 0xFF173C70
+private const val CARD_DARK = 0xAA24558A
+private const val FIELD_DARK = 0xFF0D2046
+private const val BORDER_BLUE = 0xFF1E5ED8
+private const val SUCCESS = 0xFF55DFA1
+private const val DANGER = 0xFFFF7777
+private const val WARNING = 0xFFFFD43B
+private const val TEXT_LIGHT = 0xFFE8F2FF
+private const val MUTED_LIGHT = 0xFFBFD0E8
+
+data class TpaData(
+    val material: String = Materials.first(),
+    val perBox: String = "",
+    val boxes: String = "",
+    val defect: String = "",
+    val weight: String = "",
+    val batchTotal: String = ""
+)
+
+data class HistoryEntry(
+    val date: String,
+    val tpa: String,
+    val material: String,
+    val good: Double,
+    val defect: Double,
+    val batch: Double,
+    val weight: Double
+)
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent { PremiumTpaApp(this) }
+    }
+}
+
+@Composable
+private fun PremiumTpaApp(context: Context) {
+    val prefs = remember { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
+
+    // Один раз переводим внешний вид на стиль старой web-версии:
+    // тёмная тема + Galaxy. После этого пользовательские настройки сохраняются.
+    val visualVersion = prefs.getInt(VISUAL_VERSION_KEY, 0)
+    if (visualVersion < 3) {
+        prefs.edit()
+            .putBoolean(THEME_KEY, true)
+            .putInt(WALLPAPER_KEY, 3)
+            .putInt(VISUAL_VERSION_KEY, 3).remove(COLLAPSED_KEY)
+            .apply()
+    }
+
+    var darkTheme by remember { mutableStateOf(prefs.getBoolean(THEME_KEY, true)) }
+    var wallpaper by remember { mutableStateOf(prefs.getInt(WALLPAPER_KEY, 3)) }
+    var tab by remember { mutableStateOf(0) }
+    var showReset by remember { mutableStateOf(false) }
+    var showShare by remember { mutableStateOf(false) }
+
+    val data = remember {
+        mutableStateListOf<TpaData>().also { list ->
+            val saved = prefs.getString(DATA_KEY, null)
+            if (saved != null) {
+                try {
+                    val arr = JSONArray(saved)
+                    for (i in 0 until arr.length()) {
+                        val o = arr.getJSONObject(i)
+                        list.add(
+                            TpaData(
+                                o.optString("material", Materials.first()),
+                                o.optString("perBox"),
+                                o.optString("boxes"),
+                                o.optString("defect"),
+                                o.optString("weight"),
+                                o.optString("batchTotal")
+                            )
+                        )
+                    }
+                } catch (_: Exception) {}
+            }
+            while (list.size < TpaNames.size) list.add(TpaData())
+        }
+    }
+
+    val collapsed = remember {
+        mutableStateMapOf<String, Boolean>().also { map ->
+            val saved = prefs.getString(COLLAPSED_KEY, null)
+            if (saved != null) {
+                try {
+                    val o = JSONObject(saved)
+                    TpaNames.forEach { map[it] = o.optBoolean(it, false) }
+                } catch (_: Exception) {}
+            }
+            TpaNames.forEach { map.putIfAbsent(it, false) }
+        }
+    }
+
+    val history = remember {
+        mutableStateListOf<HistoryEntry>().also { list ->
+            val saved = prefs.getString(HISTORY_KEY, null)
+            if (saved != null) {
+                try {
+                    val arr = JSONArray(saved)
+                    for (i in 0 until arr.length()) {
+                        val o = arr.getJSONObject(i)
+                        list.add(
+                            HistoryEntry(
+                                o.optString("date"),
+                                o.optString("tpa"),
+                                o.optString("material"),
+                                o.optDouble("good"),
+                                o.optDouble("defect"),
+                                o.optDouble("batch"),
+                                o.optDouble("weight")
+                            )
+                        )
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    fun saveAll() {
+        val arr = JSONArray()
+        data.forEach {
+            arr.put(
+                JSONObject().apply {
+                    put("material", it.material)
+                    put("perBox", it.perBox)
+                    put("boxes", it.boxes)
+                    put("defect", it.defect)
+                    put("weight", it.weight)
+                    put("batchTotal", it.batchTotal)
+                }
+            )
+        }
+
+        val c = JSONObject()
+        collapsed.forEach { (k, v) -> c.put(k, v) }
+
+        val h = JSONArray()
+        history.forEach {
+            h.put(
+                JSONObject().apply {
+                    put("date", it.date)
+                    put("tpa", it.tpa)
+                    put("material", it.material)
+                    put("good", it.good)
+                    put("defect", it.defect)
+                    put("batch", it.batch)
+                    put("weight", it.weight)
+                }
+            )
+        }
+
+        prefs.edit()
+            .putString(DATA_KEY, arr.toString())
+            .putString(COLLAPSED_KEY, c.toString())
+            .putString(HISTORY_KEY, h.toString())
+            .putBoolean(THEME_KEY, darkTheme)
+            .putInt(WALLPAPER_KEY, wallpaper)
+            .apply()
+    }
+
+    LaunchedEffect(data.toList(), collapsed.toMap(), darkTheme, wallpaper, history.toList()) {
+        saveAll()
+    }
+
+    val colors = if (darkTheme) {
+        AppColors(
+            text = Color(TEXT_LIGHT),
+            muted = Color(MUTED_LIGHT),
+            primary = Color(CYAN),
+            card = Color(CARD_DARK),
+            field = Color(FIELD_DARK),
+            border = Color(BORDER_BLUE),
+            success = Color(SUCCESS),
+            danger = Color(DANGER),
+            warning = Color(WARNING)
+        )
+    } else {
+        AppColors(
+            text = Color(0xFF172554),
+            muted = Color(0xFF4B5563),
+            primary = Color(CYAN_DARK),
+            card = Color(0xEFFFFFFF),
+            field = Color(0xFFF8FAFC),
+            border = Color(0xFFBAE6FD),
+            success = Color(0xFF10B981),
+            danger = Color(0xFFEF4444),
+            warning = Color(0xFFF59E0B)
+        )
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(backgroundBrush(wallpaper, darkTheme))
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            Header(
+                colors = colors,
+                wallpaper = wallpaper,
+                darkTheme = darkTheme,
+                onWallpaper = {
+                    wallpaper = it
+                    prefs.edit().putInt(WALLPAPER_KEY, it).apply()
+                },
+                onTheme = {
+                    darkTheme = !darkTheme
+                    prefs.edit().putBoolean(THEME_KEY, darkTheme).apply()
+                },
+                onToggleAll = {
+                    val all = TpaNames.all { collapsed[it] == true }
+                    TpaNames.forEach { collapsed[it] = !all }
+                }
+            )
+
+            AppTabs(
+                tab = tab,
+                colors = colors,
+                onTab = { tab = it }
+            )
+
+            when (tab) {
+                0 -> CalculatorScreen(
+                    data = data,
+                    collapsed = collapsed,
+                    colors = colors,
+                    onData = { index, value -> data[index] = value },
+                    onCollapse = { name, value -> collapsed[name] = value },
+                    onReset = { showReset = true },
+                    onSaveShift = {
+                        val now = SimpleDateFormat(
+                            "dd.MM.yyyy HH:mm",
+                            Locale.getDefault()
+                        ).format(Date())
+
+                        data.forEachIndexed { index, d ->
+                            val good = num(d.perBox) * num(d.boxes)
+                            val defect = num(d.defect)
+                            val batch = num(d.batchTotal) + good
+
+                            if (good > 0 || defect > 0 || batch > 0) {
+                                history.add(
+                                    HistoryEntry(
+                                        now,
+                                        TpaNames[index],
+                                        d.material,
+                                        good,
+                                        defect,
+                                        batch,
+                                        num(d.weight)
+                                    )
+                                )
+                            }
+                        }
+                        tab = 2
+                    }
+                )
+
+                1 -> ReportScreen(
+                    data = data,
+                    colors = colors,
+                    onShare = { showShare = true }
+                )
+
+                else -> HistoryScreen(
+                    history = history,
+                    colors = colors,
+                    onClear = { history.clear() }
+                )
+            }
+        }
+    }
+
+    if (showReset) {
+        AlertDialog(
+            onDismissRequest = { showReset = false },
+            title = { Text("Очистить данные?") },
+            text = {
+                Text(
+                    "Будут очищены введённые данные ТПА. " +
+                        "Настройки темы, фона и история останутся."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        for (i in data.indices) data[i] = TpaData()
+                        showReset = false
+                    }
+                ) { Text("Очистить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showReset = false }) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
+
+    if (showShare) {
+        ShareDialog(
+            text = buildReport(data),
+            onDismiss = { showShare = false },
+            onShare = { text ->
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, text)
+                }
+                context.startActivity(
+                    Intent.createChooser(intent, "Поделиться отчётом")
+                )
+                showShare = false
+            }
+        )
+    }
+}
+
+private data class AppColors(
+    val text: Color,
+    val muted: Color,
+    val primary: Color,
+    val card: Color,
+    val field: Color,
+    val border: Color,
+    val success: Color,
+    val danger: Color,
+    val warning: Color
+)
+
+@Composable
+private fun Header(
+    colors: AppColors,
+    wallpaper: Int,
+    darkTheme: Boolean,
+    onWallpaper: (Int) -> Unit,
+    onTheme: () -> Unit,
+    onToggleAll: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Аквапласт калькулятор",
+                    color = colors.text,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "Производственный калькулятор",
+                    color = colors.muted,
+                    fontSize = 13.sp
+                )
+            }
+
+            HeaderIconButton(
+                text = if (darkTheme) "☀" else "☾",
+                colors = colors,
+                onClick = onTheme
+            )
+            Spacer(Modifier.width(8.dp))
+            HeaderIconButton(
+                text = "⤢",
+                colors = colors,
+                onClick = onToggleAll
+            )
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        WallpaperButton(
+            wallpaper = wallpaper,
+            colors = colors,
+            onWallpaper = onWallpaper
+        )
+    }
+}
+
+@Composable
+private fun HeaderIconButton(
+    text: String,
+    colors: AppColors,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(52.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(colors.card)
+            .border(1.dp, colors.border, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text, color = colors.text, fontSize = 25.sp)
+    }
+}
+
+@Composable
+private fun WallpaperButton(
+    wallpaper: Int,
+    colors: AppColors,
+    onWallpaper: (Int) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val names = listOf("🎨 Ocean", "🌅 Sunrise", "🌌 Galaxy")
+
+    Box {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(14.dp))
+                .background(colors.card)
+                .border(1.dp, colors.border, RoundedCornerShape(14.dp))
+                .clickable { expanded = true }
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Фон: ${names[(wallpaper - 1).coerceIn(0, 2)]}",
+                color = colors.text,
+                fontSize = 15.sp
+            )
+            Spacer(Modifier.width(10.dp))
+            Text("⌄", color = colors.primary, fontSize = 20.sp)
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            names.forEachIndexed { index, name ->
+                DropdownMenuItem(
+                    text = { Text(name) },
+                    onClick = {
+                        onWallpaper(index + 1)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppTabs(
+    tab: Int,
+    colors: AppColors,
+    onTab: (Int) -> Unit
+) {
+    val names = listOf("🧮  Калькулятор", "📋  Отчёт", "🕘  История")
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        names.forEachIndexed { index, name ->
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        if (tab == index) colors.primary.copy(alpha = 0.22f)
+                        else colors.card
+                    )
+                    .border(
+                        1.dp,
+                        if (tab == index) colors.primary else colors.border,
+                        RoundedCornerShape(16.dp)
+                    )
+                    .clickable { onTab(index) }
+                    .padding(vertical = 14.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    name,
+                    color = if (tab == index) colors.primary else colors.muted,
+                    fontWeight = if (tab == index) FontWeight.Bold else FontWeight.Medium,
+                    fontSize = 13.sp
+                )
+            }
+        }
+    }
+
+    Spacer(Modifier.height(10.dp))
+}
+
+@Composable
+private fun CalculatorScreen(
+    data: SnapshotStateList<TpaData>,
+    collapsed: MutableMap<String, Boolean>,
+    colors: AppColors,
+    onData: (Int, TpaData) -> Unit,
+    onCollapse: (String, Boolean) -> Unit,
+    onReset: () -> Unit,
+    onSaveShift: () -> Unit
+) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        data.forEachIndexed { index, d ->
+            TpaCard(
+                name = TpaNames[index],
+                data = d,
+                collapsed = collapsed[TpaNames[index]] == true,
+                colors = colors,
+                onData = { onData(index, it) },
+                onCollapse = { onCollapse(TpaNames[index], it) }
+            )
+        }
+
+        ActionButton(
+            text = "💾  Сохранить смену в историю",
+            colors = colors,
+            onClick = onSaveShift
+        )
+
+        ActionButton(
+            text = "🗑  Очистить все данные",
+            colors = colors,
+            danger = true,
+            onClick = onReset
+        )
+
+        Spacer(Modifier.height(25.dp))
+    }
+}
+
+@Composable
+private fun TpaCard(
+    name: String,
+    data: TpaData,
+    collapsed: Boolean,
+    colors: AppColors,
+    onData: (TpaData) -> Unit,
+    onCollapse: (Boolean) -> Unit
+) {
+    val good = num(data.perBox) * num(data.boxes)
+    val defect = num(data.defect)
+    val weight = num(data.weight)
+    val batchToday = num(data.batchTotal) + good
+
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = colors.card),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                1.dp,
+                colors.border,
+                RoundedCornerShape(20.dp)
+            )
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            colors.card.copy(alpha = 0.98f),
+                            Color(0x992B6AA2)
+                        )
+                    )
+                )
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(colors.primary.copy(alpha = 0.08f))
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    name,
+                    color = colors.text,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+
+                Switch(
+                    checked = !collapsed,
+                    onCheckedChange = { onCollapse(!it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = colors.success,
+                        uncheckedThumbColor = Color.White,
+                        uncheckedTrackColor = Color(0xFFBFC3C9)
+                    )
+                )
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    "Данные",
+                    color = colors.primary,
+                    fontSize = 23.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        "Гот: ${fmt(good)} шт",
+                        color = colors.success,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Брак: ${fmt(defect)} шт",
+                        color = colors.danger,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(2.dp)
+                    .background(colors.primary.copy(alpha = 0.35f))
+            )
+
+            if (!collapsed) {
+                Spacer(Modifier.height(12.dp))
+
+                FieldLabel("▣  Материал", colors)
+                MaterialDropdown(
+                    value = data.material,
+                    colors = colors,
+                    onChange = { onData(data.copy(material = it)) }
+                )
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    NumberField(
+                        label = "▦  Готовые: шт. в кор.",
+                        value = data.perBox,
+                        modifier = Modifier.weight(1f),
+                        keyboardType = KeyboardType.Number,
+                        colors = colors,
+                        labelColor = colors.success
+                    ) { onData(data.copy(perBox = it)) }
+
+                    NumberField(
+                        label = "▦  Готовые: кол-во кор.",
+                        value = data.boxes,
+                        modifier = Modifier.weight(1f),
+                        keyboardType = KeyboardType.Number,
+                        colors = colors,
+                        labelColor = colors.success
+                    ) { onData(data.copy(boxes = it)) }
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    NumberField(
+                        label = "✕  Брак (шт)",
+                        value = data.defect,
+                        modifier = Modifier.weight(1f),
+                        keyboardType = KeyboardType.Number,
+                        colors = colors,
+                        labelColor = colors.danger
+                    ) { onData(data.copy(defect = it)) }
+
+                    NumberField(
+                        label = "⚖  Вес 1 дет. (г)",
+                        value = data.weight,
+                        modifier = Modifier.weight(1f),
+                        keyboardType = KeyboardType.Decimal,
+                        colors = colors
+                    ) { onData(data.copy(weight = it)) }
+                }
+
+                Card(
+                    shape = RoundedCornerShape(15.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = colors.field.copy(alpha = 0.55f)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 5.dp)
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(
+                            "Партия: ${fmt(batchToday)} шт / ${kg(batchToday, weight)} кг",
+                            color = colors.warning,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        NumberField(
+                            label = "▰  Всего за партию (шт)",
+                            value = data.batchTotal,
+                            modifier = Modifier.fillMaxWidth(),
+                            keyboardType = KeyboardType.Number,
+                            colors = colors,
+                            labelColor = colors.warning
+                        ) { onData(data.copy(batchTotal = it)) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FieldLabel(text: String, colors: AppColors) {
+    Text(
+        text,
+        color = colors.muted,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(bottom = 4.dp)
+    )
+}
+
+@Composable
+private fun MaterialDropdown(
+    value: String,
+    colors: AppColors,
+    onChange: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box(Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(colors.field)
+                .border(1.dp, colors.border.copy(alpha = 0.7f), RoundedCornerShape(14.dp))
+                .clickable { expanded = true }
+                .padding(horizontal = 16.dp, vertical = 15.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                value,
+                color = colors.text,
+                fontSize = 16.sp,
+                modifier = Modifier.weight(1f)
+            )
+            Text("⌄", color = colors.muted, fontSize = 20.sp)
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            Materials.forEach {
+                DropdownMenuItem(
+                    text = { Text(it) },
+                    onClick = {
+                        onChange(it)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+
+    Spacer(Modifier.height(8.dp))
+}
+
+@Composable
+private fun NumberField(
+    label: String,
+    value: String,
+    modifier: Modifier,
+    keyboardType: KeyboardType,
+    colors: AppColors,
+    labelColor: Color = colors.muted,
+    onValue: (String) -> Unit
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { new ->
+            if (
+                new.isEmpty() ||
+                new.all { it.isDigit() || it == '.' || it == ',' }
+            ) {
+                onValue(new.replace(',', '.'))
+            }
+        },
+        label = {
+            Text(
+                label,
+                color = labelColor,
+                fontSize = 13.sp
+            )
+        },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = colors.text,
+            unfocusedTextColor = colors.text,
+            focusedContainerColor = colors.field,
+            unfocusedContainerColor = colors.field,
+            focusedBorderColor = labelColor,
+            unfocusedBorderColor = colors.border.copy(alpha = 0.65f),
+            focusedLabelColor = labelColor,
+            unfocusedLabelColor = labelColor.copy(alpha = 0.9f),
+            cursorColor = colors.primary
+        ),
+        modifier = modifier.padding(vertical = 5.dp)
+    )
+}
+
+@Composable
+private fun ActionButton(
+    text: String,
+    colors: AppColors,
+    danger: Boolean = false,
+    onClick: () -> Unit
+) {
+    Button(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(54.dp),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Text(
+            text,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
+private fun ReportScreen(
+    data: List<TpaData>,
+    colors: AppColors,
+    onShare: () -> Unit
+) {
+    val active = data.mapIndexed { i, d -> i to d }.filter { (_, d) ->
+        num(d.perBox) * num(d.boxes) > 0 ||
+            num(d.defect) > 0 ||
+            num(d.batchTotal) > 0
+    }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            "ОТЧЁТ",
+            color = colors.primary,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        if (active.isEmpty()) {
+            InfoCard(
+                "Заполните данные во вкладке «Калькулятор», чтобы увидеть отчёт.",
+                colors
+            )
+        } else {
+            active.forEach { (index, d) ->
+                val good = num(d.perBox) * num(d.boxes)
+                val defect = num(d.defect)
+                val weight = num(d.weight)
+                val batch = num(d.batchTotal) + good
+
+                Card(
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = colors.card
+                    )
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(
+                            TpaNames[index],
+                            color = colors.primary,
+                            fontSize = 19.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            d.material,
+                            color = colors.muted,
+                            fontSize = 13.sp
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Готовые: ${fmt(good)} шт / ${kg(good, weight)} кг",
+                            color = colors.success
+                        )
+                        Text(
+                            "Брак: ${fmt(defect)} шт / ${kg(defect, weight)} кг",
+                            color = colors.danger
+                        )
+                        Text(
+                            "Партия (вкл. смену): ${fmt(batch)} шт / ${kg(batch, weight)} кг",
+                            color = colors.warning
+                        )
+                    }
+                }
+            }
+
+            ActionButton(
+                text = "↗  Поделиться отчётом",
+                colors = colors,
+                onClick = onShare
+            )
+        }
+
+        Spacer(Modifier.height(25.dp))
+    }
+}
+
+@Composable
+private fun HistoryScreen(
+    history: List<HistoryEntry>,
+    colors: AppColors,
+    onClear: () -> Unit
+) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "ИСТОРИЯ",
+                color = colors.primary,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f)
+            )
+            if (history.isNotEmpty()) {
+                TextButton(onClick = onClear) {
+                    Text("Очистить", color = colors.danger)
+                }
+            }
+        }
+
+        if (history.isEmpty()) {
+            InfoCard("История пока пустая.", colors)
+        } else {
+            history.asReversed().forEach { h ->
+                Card(
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = colors.card
+                    )
+                ) {
+                    Column(Modifier.padding(15.dp)) {
+                        Text(
+                            "${h.tpa} • ${h.material}",
+                            color = colors.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            h.date,
+                            color = colors.muted,
+                            fontSize = 12.sp
+                        )
+                        Spacer(Modifier.height(5.dp))
+                        Text("Готовые: ${fmt(h.good)} шт", color = colors.success)
+                        Text("Брак: ${fmt(h.defect)} шт", color = colors.danger)
+                        Text(
+                            "Партия: ${fmt(h.batch)} шт",
+                            color = colors.warning
+                        )
+                        Text(
+                            "Вес детали: ${format2(h.weight)} г",
+                            color = colors.muted
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(25.dp))
+    }
+}
+
+@Composable
+private fun InfoCard(text: String, colors: AppColors) {
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = colors.card)
+    ) {
+        Text(
+            text,
+            color = colors.text,
+            modifier = Modifier.padding(22.dp)
+        )
+    }
+}
+
+@Composable
+private fun ShareDialog(
+    text: String,
+    onDismiss: () -> Unit,
+    onShare: (String) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Поделиться отчётом") },
+        text = {
+            Text(
+                text,
+                fontSize = 13.sp,
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onShare(text) }) {
+                Text("Поделиться")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Закрыть")
+            }
+        }
+    )
+}
+
+private fun buildReport(data: List<TpaData>): String {
+    val date = SimpleDateFormat(
+        "dd.MM.yyyy HH:mm",
+        Locale.getDefault()
+    ).format(Date())
+
+    val lines = mutableListOf<String>()
+    lines += "📊 TPA PREMIUM — ОТЧЁТ"
+    lines += "📅 $date"
+    lines += "━━━━━━━━━━━━━━━━━━━━"
+
+    var totalGood = 0.0
+    var totalDefect = 0.0
+
+    data.forEachIndexed { index, d ->
+        val good = num(d.perBox) * num(d.boxes)
+        val defect = num(d.defect)
+        val batch = num(d.batchTotal) + good
+
+        if (good <= 0 && defect <= 0 && batch <= 0) {
+            return@forEachIndexed
+        }
+
+        val goodKg = good * num(d.weight) / 1000.0
+        val defectKg = defect * num(d.weight) / 1000.0
+        val batchKg = batch * num(d.weight) / 1000.0
+
+        lines += "🏭 ${TpaNames[index]} (${d.material})"
+        lines += "   ✅ Готовые: ${fmt(good)} шт / ${format3(goodKg)} кг"
+        if (defect > 0) {
+            lines += "   ❌ Брак: ${fmt(defect)} шт / ${format3(defectKg)} кг"
+        }
+        lines += "   📦 Партия: ${fmt(batch)} шт / ${format3(batchKg)} кг"
+        lines += ""
+
+        totalGood += goodKg
+        totalDefect += defectKg
+    }
+
+    lines += "━━━━━━━━━━━━━━━━━━━━"
+    lines += "📦 ИТОГО ПО СЫРЬЮ"
+    lines += "Готовые: ${format3(totalGood)} кг"
+    lines += "Брак: ${format3(totalDefect)} кг"
+    lines += "Всего: ${format3(totalGood + totalDefect)} кг"
+
+    return lines.joinToString("\n")
+}
+
+private fun num(value: String): Double =
+    value.replace(',', '.').toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
+
+private fun fmt(value: Double): String =
+    if (value % 1.0 == 0.0) value.toLong().toString()
+    else format2(value)
+
+private fun format2(value: Double): String =
+    String.format(Locale.US, "%.2f", value)
+
+private fun format3(value: Double): String =
+    String.format(Locale.US, "%.3f", value)
+
+private fun kg(parts: Double, weight: Double): String =
+    format3(parts * weight / 1000.0)
+
+private fun backgroundBrush(wallpaper: Int, dark: Boolean): Brush {
+    return if (!dark) {
+        when (wallpaper) {
+            2 -> Brush.radialGradient(
+                listOf(Color(0xFFE0F2FE), Color(0xFFBAE6FD))
+            )
+            3 -> Brush.linearGradient(
+                listOf(Color(0xFFDBEAFE), Color(0xFFBAE6FD))
+            )
+            else -> Brush.linearGradient(
+                listOf(Color(0xFF0EA5E9), Color(0xFF38BDF8))
+            )
+        }
+    } else {
+        when (wallpaper) {
+            2 -> Brush.radialGradient(
+                listOf(Color(0xFF1E3A8A), Color(BG_DARK_1))
+            )
+            3 -> Brush.linearGradient(
+                listOf(Color(0xFF152D5A), Color(BG_DARK_1), Color(0xFF0B3156))
+            )
+            else -> Brush.linearGradient(
+                listOf(Color(0xFF0C4A6E), Color(0xFF1E3A8A))
+            )
+        }
+    }
+}
