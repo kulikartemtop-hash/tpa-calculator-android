@@ -1,3 +1,4 @@
+// TPA CALCULATOR BUILD: 2026-10-06 — verified total batch calculation
 package com.myapp.app
 
 import android.content.Context
