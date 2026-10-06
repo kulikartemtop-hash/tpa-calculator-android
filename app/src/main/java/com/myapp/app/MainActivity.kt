@@ -65,7 +65,7 @@ import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
 
-private val TpaNames = (1..13).map { "ТПА $it" } + "Малыш" + "Трубы после Малыша"
+private val TpaNames = (1..13).map { "ТПА $it" } + "Малыш" + "Трубы"
 private val Materials = listOf("ПВХ серый", "ПВХ коричневый", "АБС", "PP")
 
 private const val PREFS = "tpa_premium_android"
@@ -1085,10 +1085,15 @@ private fun TubeTpaCard(
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatPill("ИЗГОТОВЛЕНО", "${fmt(manufactured)} шт", colors.success, colors)
                 StatPill("БРАК", "${fmt(defect)} шт", colors.danger, colors)
-                StatPill("ВЕС 1 ТРУБЫ", "${format3(weight)} г", colors.primary, colors)
                 StatPill("ПАРТИЯ", "${fmt(batch)} шт / ${format3(batchKg)} кг", colors.warning, colors)
             }
             Spacer(Modifier.height(12.dp))
+            FieldLabel("▣  Материал", colors)
+            MaterialDropdown(
+                value = current.material,
+                colors = colors,
+                onChange = { onData(data.copy(parts = listOf(current.copy(material = it)))) }
+            )
             NumberField(
                 label = "▦  Количество изготовленных труб (шт)",
                 value = current.perBox, modifier = Modifier.fillMaxWidth(),
@@ -1690,6 +1695,32 @@ private fun ReportScreen(
     }
 
 
+    // Общий отчёт и отчёт по материалам считают только фактически изготовленную продукцию и брак.
+    // Указанная партия / общая партия ТПА сюда намеренно не попадают.
+    val overallGoodKg = included.sumOf { (index, tpa) ->
+        tpa.parts.sumOf { part ->
+            val good = if (index == TpaNames.lastIndex) num(part.perBox) else num(part.perBox) * num(part.boxes)
+            good * weightGrams(part) / 1000.0
+        }
+    }
+    val overallDefectKg = included.sumOf { (_, tpa) ->
+        tpa.parts.sumOf { part -> num(part.defect) * weightGrams(part) / 1000.0 }
+    }
+
+    val materialTotals = linkedMapOf<String, DoubleArray>()
+    included.forEach { (index, tpa) ->
+        tpa.parts.forEach { part ->
+            val good = if (index == TpaNames.lastIndex) num(part.perBox) else num(part.perBox) * num(part.boxes)
+            val defect = num(part.defect)
+            val weight = weightGrams(part)
+            val totals = materialTotals.getOrPut(part.material) { doubleArrayOf(0.0, 0.0, 0.0, 0.0) }
+            totals[0] += good
+            totals[1] += good * weight / 1000.0
+            totals[2] += defect
+            totals[3] += defect * weight / 1000.0
+        }
+    }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -1705,7 +1736,7 @@ private fun ReportScreen(
                 colors
             )
         } else {
-            // Отдельный отчёт по каждому включённому станку.
+            // Отдельный отчёт по каждому включённому станку. Здесь партия сохраняется.
             included.forEach { (index, tpa) ->
                 Card(
                     shape = RoundedCornerShape(20.dp),
@@ -1734,13 +1765,13 @@ private fun ReportScreen(
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold
                             )
+                            Text("Материал: ${part.material}", color = colors.muted, fontSize = 13.sp)
                             if (isTube) {
                                 Text("Изготовлено труб: ${fmt(good)} шт / ${format3(goodKg)} кг", color = colors.success, fontSize = 15.sp)
                                 Text("Брак: ${fmt(defect)} шт / ${format3(defectKg)} кг", color = colors.danger, fontSize = 15.sp)
                                 Text("Вес 1 трубы: ${format3(weight)} г", color = colors.primary, fontSize = 14.sp)
                                 Text("Партия: ${fmt(specifiedBatch)} шт / ${format3(specifiedBatchKg)} кг", color = colors.warning, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             } else {
-                                Text("Материал: ${part.material}", color = colors.muted, fontSize = 13.sp)
                                 Text("Указанная партия: ${fmt(specifiedBatch)} шт / ${format3(specifiedBatchKg)} кг", color = colors.warning, fontSize = 14.sp)
                                 Text("Готовые за смену: ${fmt(good)} шт / ${format3(goodKg)} кг", color = colors.success, fontSize = 15.sp)
                                 Text("Общая партия ТПА: ${fmt(totalBatch)} шт / ${format3(totalBatchWeightKg)} кг", color = colors.warning, fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -1756,6 +1787,45 @@ private fun ReportScreen(
                 }
             }
 
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = colors.card),
+                modifier = Modifier.fillMaxWidth().border(1.dp, colors.border, RoundedCornerShape(20.dp))
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("ОБЩИЙ ОТЧЁТ", color = colors.primary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    Text("Готовая продукция: ${format3(overallGoodKg)} кг", color = colors.success, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("Брак: ${format3(overallDefectKg)} кг", color = colors.danger, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("Итого без партии: ${format3(overallGoodKg + overallDefectKg)} кг", color = colors.warning, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = colors.card),
+                modifier = Modifier.fillMaxWidth().border(1.dp, colors.border, RoundedCornerShape(20.dp))
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("ОТЧЁТ ПО МАТЕРИАЛАМ", color = colors.primary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    val usedMaterials = materialTotals.filter { it.value[0] > 0.0 || it.value[2] > 0.0 }
+                    usedMaterials.forEachIndexed { materialIndex, entry ->
+                        val material = entry.key
+                        val totals = entry.value
+                        Text(material, color = colors.warning, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Text("Готовые: ${fmt(totals[0])} шт / ${format3(totals[1])} кг", color = colors.success, fontSize = 14.sp)
+                        Text("Брак: ${fmt(totals[2])} шт / ${format3(totals[3])} кг", color = colors.danger, fontSize = 14.sp)
+                        Text("Всего материала: ${format3(totals[1] + totals[3])} кг", color = colors.text, fontSize = 14.sp)
+                        if (materialIndex < usedMaterials.lastIndex) {
+                            Spacer(Modifier.height(8.dp))
+                            Box(Modifier.fillMaxWidth().height(1.dp).background(colors.primary.copy(alpha = 0.2f)))
+                            Spacer(Modifier.height(8.dp))
+                        }
+                    }
+                }
+            }
+
             ActionButton(
                 text = "↗  Поделиться отчётом",
                 colors = colors,
@@ -1766,7 +1836,6 @@ private fun ReportScreen(
         Spacer(Modifier.height(25.dp))
     }
 }
-
 @Composable
 private fun TemplateDialog(
     templates: List<PartTemplate>,
