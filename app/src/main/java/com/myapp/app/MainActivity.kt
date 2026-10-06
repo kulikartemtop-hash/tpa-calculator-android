@@ -1942,7 +1942,9 @@ private fun buildReport(data: List<TpaData>): String {
     val date = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date())
     var totalGoodKg = 0.0
     var totalDefectKg = 0.0
-    val materialTotals = linkedMapOf<String, Pair<Double, Double>>()
+    var totalBatchParts = 0.0
+    var totalBatchKg = 0.0
+    val materialTotals = linkedMapOf<String, Triple<Double, Double, Double>>()
 
     val lines = mutableListOf<String>()
     lines += "📊 TPA PREMIUM — ОТЧЁТ"
@@ -1956,37 +1958,48 @@ private fun buildReport(data: List<TpaData>): String {
         lines += ""
         lines += "🏭 ${TpaNames.getOrElse(index) { "ТПА" }}"
         reportParts.forEachIndexed { partIndex, part ->
+            val specifiedBatch = num(part.batchTotal)
             val good = num(part.perBox) * num(part.boxes)
+            val totalBatch = specifiedBatch + good
             val defect = num(part.defect)
             val weight = weightGrams(part)
+            val specifiedBatchKg = specifiedBatch * weight / 1000.0
             val goodKg = good * weight / 1000.0
+            val totalBatchKgPart = totalBatch * weight / 1000.0
             val defectKg = defect * weight / 1000.0
             totalGoodKg += goodKg
             totalDefectKg += defectKg
-            val old = materialTotals[part.material] ?: (0.0 to 0.0)
-            materialTotals[part.material] = (old.first + goodKg) to (old.second + defectKg)
+            totalBatchParts += totalBatch
+            totalBatchKg += totalBatchKgPart
+
+            val old = materialTotals[part.material] ?: Triple(0.0, 0.0, 0.0)
+            materialTotals[part.material] = Triple(old.first + totalBatchKgPart, old.second + goodKg, old.third + defectKg)
+
             lines += "🔹 ${if (part.name.isBlank()) "Деталь ${partIndex + 1}" else part.name} (${part.material})"
-            lines += "   Готовые: ${fmt(good)} шт / ${format3(goodKg)} кг"
+            lines += "   Указанная партия: ${fmt(specifiedBatch)} шт / ${format3(specifiedBatchKg)} кг"
+            lines += "   Готовые за смену: ${fmt(good)} шт / ${format3(goodKg)} кг"
+            lines += "   Общая партия ТПА: ${fmt(totalBatch)} шт / ${format3(totalBatchKgPart)} кг"
             lines += "   Брак: ${fmt(defect)} шт / ${format3(defectKg)} кг"
         }
     }
 
     lines += ""
     lines += "📋 ИТОГОВЫЙ ОТЧЁТ"
+    lines += "Общая партия всех ТПА: ${fmt(totalBatchParts)} шт / ${format3(totalBatchKg)} кг"
     lines += "Готовые детали: ${format3(totalGoodKg)} кг"
     lines += "Общий вес брака: ${format3(totalDefectKg)} кг"
     lines += ""
     lines += "⚖ ПО МАТЕРИАЛАМ"
     Materials.forEach { material ->
         val totals = materialTotals[material]
-        if (totals != null && (totals.first > 0.0 || totals.second > 0.0)) {
-            lines += "$material — готовые: ${format3(totals.first)} кг; брак: ${format3(totals.second)} кг; всего: ${format3(totals.first + totals.second)} кг"
+        if (totals != null) {
+            lines += "$material — общая партия: ${format3(totals.first)} кг; готовые: ${format3(totals.second)} кг; брак: ${format3(totals.third)} кг"
         }
     }
     lines += ""
-    lines += "ОБЩИЙ ВЕС ГОТОВЫХ ИЗДЕЛИЙ: ${format3(totalGoodKg)} кг"
+    lines += "ОБЩАЯ ПАРТИЯ: ${fmt(totalBatchParts)} шт / ${format3(totalBatchKg)} кг"
     lines += "ОБЩИЙ ВЕС БРАКА: ${format3(totalDefectKg)} кг"
-    lines += "ОБЩИЙ ВЕС: ${format3(totalGoodKg + totalDefectKg)} кг"
+    lines += "ВЕС ОБЩЕЙ ПАРТИИ + БРАК: ${format3(totalBatchKg + totalDefectKg)} кг"
     return lines.joinToString("\n")
 }
 
