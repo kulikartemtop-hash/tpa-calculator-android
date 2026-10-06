@@ -1808,7 +1808,7 @@ private fun ReportScreen(
                 Column(Modifier.padding(16.dp)) {
                     Text("ОТЧЁТ ПО МАТЕРИАЛАМ", color = colors.primary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
-                    val usedMaterials = materialTotals.filter { it.value[0] > 0.0 || it.value[2] > 0.0 }
+                    val usedMaterials = materialTotals.entries.filter { it.value[0] > 0.0 || it.value[2] > 0.0 }
                     usedMaterials.forEachIndexed { materialIndex, entry ->
                         val material = entry.key
                         val totals = entry.value
