@@ -1,4 +1,4 @@
-// TPA CALCULATOR BUILD: 2026-10-06 — verified total batch calculation
+// TPA CALCULATOR BUILD: 2026-10-06 — per-TPA reports + tube TPA
 package com.myapp.app
 
 import android.content.Context
@@ -65,7 +65,7 @@ import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
 
-private val TpaNames = (1..13).map { "ТПА $it" } + "Малыш"
+private val TpaNames = (1..13).map { "ТПА $it" } + "Малыш" + "Трубы после Малыша"
 private val Materials = listOf("ПВХ серый", "ПВХ коричневый", "АБС", "PP")
 
 private const val PREFS = "tpa_premium_android"
@@ -558,7 +558,7 @@ private fun PremiumTpaApp(context: Context) {
                         data.forEachIndexed { index, d ->
                             if (d.enabled) {
                                 d.parts.forEach { part ->
-                                    val good = num(part.perBox) * num(part.boxes)
+                                    val good = if (index == TpaNames.lastIndex) num(part.perBox) else num(part.perBox) * num(part.boxes)
                                     val defect = num(part.defect)
                                     if (partHasData(part) && (good > 0 || defect > 0)) {
                                         entries.add(
@@ -941,13 +941,22 @@ private fun CalculatorScreen(
             onSelect = { selectedTpa = it }
         )
 
-        TpaCard(
-            name = TpaNames[selectedTpa],
-            data = data[selectedTpa],
-            colors = colors,
-            onSaveTemplate = onSaveTemplate,
-            onData = { onData(selectedTpa, it) }
-        )
+        if (selectedTpa == TpaNames.lastIndex) {
+            TubeTpaCard(
+                name = TpaNames[selectedTpa],
+                data = data[selectedTpa],
+                colors = colors,
+                onData = { onData(selectedTpa, it) }
+            )
+        } else {
+            TpaCard(
+                name = TpaNames[selectedTpa],
+                data = data[selectedTpa],
+                colors = colors,
+                onSaveTemplate = onSaveTemplate,
+                onData = { onData(selectedTpa, it) }
+            )
+        }
 
         ActionButton(
             text = "💾  Сохранить смену в историю",
@@ -1023,6 +1032,108 @@ private fun TpaSelector(
                     fontSize = 14.sp,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TubeTpaCard(
+    name: String,
+    data: TpaData,
+    colors: AppColors,
+    onData: (TpaData) -> Unit
+) {
+    val current = data.parts.firstOrNull() ?: PartData()
+    val manufactured = num(current.perBox)
+    val defect = num(current.defect)
+    val weight = weightGrams(current)
+    val batch = num(current.batchTotal)
+    val totalBatch = batch + manufactured
+    val totalBatchKg = totalBatch * weight / 1000.0
+
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = colors.card),
+        modifier = Modifier.fillMaxWidth().shadow(14.dp, RoundedCornerShape(20.dp)).border(1.dp, colors.border, RoundedCornerShape(20.dp))
+    ) {
+        Column(
+            Modifier.fillMaxWidth().background(
+                Brush.linearGradient(listOf(colors.card.copy(alpha = 0.98f), Color(0x992B6AA2)))
+            ).padding(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                    .background(colors.primary.copy(alpha = 0.09f))
+                    .border(1.dp, colors.primary.copy(alpha = 0.16f), RoundedCornerShape(14.dp))
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(name, color = colors.text, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                    Text(if (data.enabled) "Участвует в отчёте" else "Исключён из отчёта",
+                        color = if (data.enabled) colors.success else colors.danger, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Switch(
+                    checked = data.enabled,
+                    onCheckedChange = { onData(data.copy(enabled = it)) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White, checkedTrackColor = colors.success,
+                        uncheckedThumbColor = Color.White, uncheckedTrackColor = Color(0xFF6B7280)
+                    )
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatPill("ИЗГОТОВЛЕНО", "${fmt(manufactured)} шт", colors.success, colors)
+                StatPill("БРАК", "${fmt(defect)} шт", colors.danger, colors)
+                StatPill("ВЕС 1 ТРУБЫ", "${format3(weight)} г", colors.primary, colors)
+                StatPill("ПАРТИЯ", "${fmt(totalBatch)} шт / ${format3(totalBatchKg)} кг", colors.warning, colors)
+            }
+            Spacer(Modifier.height(12.dp))
+            NumberField(
+                label = "▦  Количество изготовленных труб (шт)",
+                value = current.perBox, modifier = Modifier.fillMaxWidth(),
+                keyboardType = KeyboardType.Number, colors = colors, labelColor = colors.success
+            ) { onData(data.copy(parts = listOf(current.copy(perBox = it)))) }
+            NumberField(
+                label = "✕  Брак (шт)",
+                value = current.defect, modifier = Modifier.fillMaxWidth(),
+                keyboardType = KeyboardType.Number, colors = colors, labelColor = colors.danger
+            ) { onData(data.copy(parts = listOf(current.copy(defect = it)))) }
+            Box {
+                NumberField(
+                    label = if (current.weightUnit == "кг") "Вес 1 трубы (кг)" else "Вес 1 трубы (г)",
+                    value = current.weight, modifier = Modifier.fillMaxWidth(),
+                    keyboardType = KeyboardType.Decimal, colors = colors
+                ) { onData(data.copy(parts = listOf(current.copy(weight = it)))) }
+                UnitToggle(
+                    value = current.weightUnit, colors = colors,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(top = 1.dp, end = 7.dp)
+                ) { newUnit ->
+                    if (newUnit == current.weightUnit) onData(data)
+                    else {
+                        val value = num(current.weight)
+                        val converted = if (newUnit == "кг") value / 1000.0 else value * 1000.0
+                        onData(data.copy(parts = listOf(current.copy(weightUnit = newUnit, weight = formatWeightInput(converted)))))
+                    }
+                }
+            }
+            Card(
+                shape = RoundedCornerShape(15.dp),
+                colors = CardDefaults.cardColors(containerColor = colors.field.copy(alpha = 0.55f)),
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                    .border(1.dp, colors.warning.copy(alpha = 0.16f), RoundedCornerShape(15.dp))
+            ) {
+                Column(Modifier.padding(10.dp)) {
+                    Text("Партия: ${fmt(totalBatch)} шт / ${format3(totalBatchKg)} кг",
+                        color = colors.warning, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+                    NumberField(
+                        label = "▰  Количество в указанной партии (шт)",
+                        value = current.batchTotal, modifier = Modifier.fillMaxWidth(),
+                        keyboardType = KeyboardType.Number, colors = colors, labelColor = colors.warning
+                    ) { onData(data.copy(parts = listOf(current.copy(batchTotal = it)))) }
+                }
             }
         }
     }
@@ -1609,8 +1720,9 @@ private fun ReportScreen(
                         Spacer(Modifier.height(8.dp))
 
                         tpa.parts.forEachIndexed { partIndex, part ->
+                            val isTube = index == TpaNames.lastIndex
                             val specifiedBatch = num(part.batchTotal)
-                            val good = num(part.perBox) * num(part.boxes)
+                            val good = if (isTube) num(part.perBox) else num(part.perBox) * num(part.boxes)
                             val totalBatch = specifiedBatch + good
                             val defect = num(part.defect)
                             val weight = weightGrams(part)
@@ -1620,16 +1732,24 @@ private fun ReportScreen(
                             val defectKg = defect * weight / 1000.0
 
                             Text(
-                                if (part.name.isBlank()) "Деталь ${partIndex + 1}" else part.name,
+                                if (isTube) "Трубы" else if (part.name.isBlank()) "Деталь ${partIndex + 1}" else part.name,
                                 color = colors.warning,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold
                             )
-                            Text("Материал: ${part.material}", color = colors.muted, fontSize = 13.sp)
-                            Text("Указанная партия: ${fmt(specifiedBatch)} шт / ${format3(specifiedBatchKg)} кг", color = colors.warning, fontSize = 14.sp)
-                            Text("Готовые за смену: ${fmt(good)} шт / ${format3(goodKg)} кг", color = colors.success, fontSize = 15.sp)
-                            Text("Общая партия ТПА: ${fmt(totalBatch)} шт / ${format3(totalBatchWeightKg)} кг", color = colors.warning, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                            Text("Брак: ${fmt(defect)} шт / ${format3(defectKg)} кг", color = colors.danger, fontSize = 15.sp)
+                            if (isTube) {
+                                Text("Изготовлено труб: ${fmt(good)} шт / ${format3(goodKg)} кг", color = colors.success, fontSize = 15.sp)
+                                Text("Брак: ${fmt(defect)} шт / ${format3(defectKg)} кг", color = colors.danger, fontSize = 15.sp)
+                                Text("Вес 1 трубы: ${format3(weight)} г", color = colors.primary, fontSize = 14.sp)
+                                Text("Указанная партия: ${fmt(specifiedBatch)} шт / ${format3(specifiedBatchKg)} кг", color = colors.warning, fontSize = 14.sp)
+                                Text("Общая партия: ${fmt(totalBatch)} шт / ${format3(totalBatchWeightKg)} кг", color = colors.warning, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            } else {
+                                Text("Материал: ${part.material}", color = colors.muted, fontSize = 13.sp)
+                                Text("Указанная партия: ${fmt(specifiedBatch)} шт / ${format3(specifiedBatchKg)} кг", color = colors.warning, fontSize = 14.sp)
+                                Text("Готовые за смену: ${fmt(good)} шт / ${format3(goodKg)} кг", color = colors.success, fontSize = 15.sp)
+                                Text("Общая партия ТПА: ${fmt(totalBatch)} шт / ${format3(totalBatchWeightKg)} кг", color = colors.warning, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                Text("Брак: ${fmt(defect)} шт / ${format3(defectKg)} кг", color = colors.danger, fontSize = 15.sp)
+                            }
                             if (partIndex < tpa.parts.lastIndex) {
                                 Spacer(Modifier.height(8.dp))
                                 Box(Modifier.fillMaxWidth().height(1.dp).background(colors.primary.copy(alpha = 0.25f)))
@@ -1896,26 +2016,21 @@ private fun ShareDialog(
 
 private fun buildReport(data: List<TpaData>): String {
     val date = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date())
-    var totalGoodKg = 0.0
-    var totalDefectKg = 0.0
-    var totalBatchParts = 0.0
-    var totalBatchKg = 0.0
-    val materialTotals = linkedMapOf<String, Triple<Double, Double, Double>>()
-
     val lines = mutableListOf<String>()
     lines += "📊 TPA PREMIUM — ОТЧЁТ"
-    lines += "📅 $date"
+    lines += "📅 ${date}"
     lines += "━━━━━━━━━━━━━━━━━━━━"
-
     data.forEachIndexed { index, tpa ->
         if (!tpa.enabled) return@forEachIndexed
         val reportParts = tpa.parts.filter(::partHasData)
         if (reportParts.isEmpty()) return@forEachIndexed
         lines += ""
         lines += "🏭 ${TpaNames.getOrElse(index) { "ТПА" }}"
+        lines += "━━━━━━━━━━━━━━━━━━━━"
         reportParts.forEachIndexed { partIndex, part ->
+            val isTube = index == TpaNames.lastIndex
             val specifiedBatch = num(part.batchTotal)
-            val good = num(part.perBox) * num(part.boxes)
+            val good = if (isTube) num(part.perBox) else num(part.perBox) * num(part.boxes)
             val totalBatch = specifiedBatch + good
             val defect = num(part.defect)
             val weight = weightGrams(part)
@@ -1923,39 +2038,22 @@ private fun buildReport(data: List<TpaData>): String {
             val goodKg = good * weight / 1000.0
             val totalBatchKgPart = totalBatch * weight / 1000.0
             val defectKg = defect * weight / 1000.0
-            totalGoodKg += goodKg
-            totalDefectKg += defectKg
-            totalBatchParts += totalBatch
-            totalBatchKg += totalBatchKgPart
-
-            val old = materialTotals[part.material] ?: Triple(0.0, 0.0, 0.0)
-            materialTotals[part.material] = Triple(old.first + totalBatchKgPart, old.second + goodKg, old.third + defectKg)
-
-            lines += "🔹 ${if (part.name.isBlank()) "Деталь ${partIndex + 1}" else part.name} (${part.material})"
-            lines += "   Указанная партия: ${fmt(specifiedBatch)} шт / ${format3(specifiedBatchKg)} кг"
-            lines += "   Готовые за смену: ${fmt(good)} шт / ${format3(goodKg)} кг"
-            lines += "   Общая партия ТПА: ${fmt(totalBatch)} шт / ${format3(totalBatchKgPart)} кг"
-            lines += "   Брак: ${fmt(defect)} шт / ${format3(defectKg)} кг"
+            lines += "🔹 " + if (isTube) "Трубы" else if (part.name.isBlank()) "Деталь " + (partIndex + 1) else part.name
+            if (isTube) {
+                lines += "   Изготовлено труб: ${fmt(good)} шт / ${format3(goodKg)} кг"
+                lines += "   Брак: ${fmt(defect)} шт / ${format3(defectKg)} кг"
+                lines += "   Вес 1 трубы: ${format3(weight)} г"
+                lines += "   Указанная партия: ${fmt(specifiedBatch)} шт / ${format3(specifiedBatchKg)} кг"
+                lines += "   Общая партия: ${fmt(totalBatch)} шт / ${format3(totalBatchKgPart)} кг"
+            } else {
+                lines += "   Материал: ${part.material}"
+                lines += "   Указанная партия: ${fmt(specifiedBatch)} шт / ${format3(specifiedBatchKg)} кг"
+                lines += "   Готовые за смену: ${fmt(good)} шт / ${format3(goodKg)} кг"
+                lines += "   Общая партия ТПА: ${fmt(totalBatch)} шт / ${format3(totalBatchKgPart)} кг"
+                lines += "   Брак: ${fmt(defect)} шт / ${format3(defectKg)} кг"
+            }
         }
     }
-
-    lines += ""
-    lines += "📋 ИТОГОВЫЙ ОТЧЁТ"
-    lines += "Общая партия всех ТПА: ${fmt(totalBatchParts)} шт / ${format3(totalBatchKg)} кг"
-    lines += "Готовые детали: ${format3(totalGoodKg)} кг"
-    lines += "Общий вес брака: ${format3(totalDefectKg)} кг"
-    lines += ""
-    lines += "⚖ ПО МАТЕРИАЛАМ"
-    Materials.forEach { material ->
-        val totals = materialTotals[material]
-        if (totals != null) {
-            lines += "$material — общая партия: ${format3(totals.first)} кг; готовые: ${format3(totals.second)} кг; брак: ${format3(totals.third)} кг"
-        }
-    }
-    lines += ""
-    lines += "ОБЩАЯ ПАРТИЯ: ${fmt(totalBatchParts)} шт / ${format3(totalBatchKg)} кг"
-    lines += "ОБЩИЙ ВЕС БРАКА: ${format3(totalDefectKg)} кг"
-    lines += "ВЕС ОБЩЕЙ ПАРТИИ + БРАК: ${format3(totalBatchKg + totalDefectKg)} кг"
     return lines.joinToString("\n")
 }
 
