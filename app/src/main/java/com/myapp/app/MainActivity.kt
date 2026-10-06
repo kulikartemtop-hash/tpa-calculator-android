@@ -1556,27 +1556,37 @@ private fun ReportScreen(
             if (parts.isNotEmpty()) index to tpa.copy(parts = parts) else null
         }
 
-    data class MaterialTotals(var goodKg: Double = 0.0, var defectKg: Double = 0.0)
+    data class MaterialTotals(var batchKg: Double = 0.0, var goodKg: Double = 0.0, var defectKg: Double = 0.0)
     val materialTotals = linkedMapOf<String, MaterialTotals>()
     var totalGoodKg = 0.0
     var totalDefectKg = 0.0
+    var totalBatchParts = 0.0
+    var totalBatchKg = 0.0
 
     included.forEach { (_, tpa) ->
         tpa.parts.forEach { part ->
+            val specifiedBatch = num(part.batchTotal)
             val good = num(part.perBox) * num(part.boxes)
+            val totalBatch = specifiedBatch + good
             val defect = num(part.defect)
             val weight = weightGrams(part)
             val goodKg = good * weight / 1000.0
+            val totalBatchWeightKg = totalBatch * weight / 1000.0
             val defectKg = defect * weight / 1000.0
+
             totalGoodKg += goodKg
             totalDefectKg += defectKg
+            totalBatchParts += totalBatch
+            totalBatchKg += totalBatchWeightKg
+
             val totals = materialTotals.getOrPut(part.material) { MaterialTotals() }
+            totals.batchKg += totalBatchWeightKg
             totals.goodKg += goodKg
             totals.defectKg += defectKg
         }
     }
 
-    val totalWeight = totalGoodKg + totalDefectKg
+    val totalWeight = totalBatchKg
 
     Column(
         Modifier
@@ -1605,10 +1615,14 @@ private fun ReportScreen(
                         Spacer(Modifier.height(8.dp))
 
                         tpa.parts.forEachIndexed { partIndex, part ->
+                            val specifiedBatch = num(part.batchTotal)
                             val good = num(part.perBox) * num(part.boxes)
+                            val totalBatch = specifiedBatch + good
                             val defect = num(part.defect)
                             val weight = weightGrams(part)
+                            val specifiedBatchKg = specifiedBatch * weight / 1000.0
                             val goodKg = good * weight / 1000.0
+                            val totalBatchWeightKg = totalBatch * weight / 1000.0
                             val defectKg = defect * weight / 1000.0
 
                             Text(
@@ -1618,7 +1632,9 @@ private fun ReportScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             Text("Материал: ${part.material}", color = colors.muted, fontSize = 13.sp)
-                            Text("Готовые: ${fmt(good)} шт / ${format3(goodKg)} кг", color = colors.success, fontSize = 15.sp)
+                            Text("Указанная партия: ${fmt(specifiedBatch)} шт / ${format3(specifiedBatchKg)} кг", color = colors.primary, fontSize = 14.sp)
+                            Text("Готовые за смену: ${fmt(good)} шт / ${format3(goodKg)} кг", color = colors.success, fontSize = 15.sp)
+                            Text("Общая партия ТПА: ${fmt(totalBatch)} шт / ${format3(totalBatchWeightKg)} кг", color = colors.primary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             Text("Брак: ${fmt(defect)} шт / ${format3(defectKg)} кг", color = colors.danger, fontSize = 15.sp)
                             if (partIndex < tpa.parts.lastIndex) {
                                 Spacer(Modifier.height(8.dp))
@@ -1639,7 +1655,8 @@ private fun ReportScreen(
                 Column(Modifier.padding(18.dp)) {
                     Text("ИТОГОВЫЙ ОТЧЁТ", color = colors.primary, fontSize = 21.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
-                    Text("Готовые детали: ${format3(totalGoodKg)} кг", color = colors.success, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Text("Общая партия всех ТПА: ${fmt(totalBatchParts)} шт / ${format3(totalBatchKg)} кг", color = colors.primary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Text("Готовые детали за смену: ${format3(totalGoodKg)} кг", color = colors.success, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                     Text("Общий вес брака: ${format3(totalDefectKg)} кг", color = colors.danger, fontSize = 17.sp, fontWeight = FontWeight.Bold)
 
                     Spacer(Modifier.height(12.dp))
@@ -1649,18 +1666,20 @@ private fun ReportScreen(
                         val totals = materialTotals[material]
                         if (totals != null && (totals.goodKg > 0.0 || totals.defectKg > 0.0)) {
                             Text(material, color = colors.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            Text("  Готовые: ${format3(totals.goodKg)} кг", color = colors.success, fontSize = 14.sp)
+                            Text("  Общая партия: ${format3(totals.batchKg)} кг", color = colors.primary, fontSize = 14.sp)
+                            Text("  Готовые за смену: ${format3(totals.goodKg)} кг", color = colors.success, fontSize = 14.sp)
                             Text("  Брак: ${format3(totals.defectKg)} кг", color = colors.danger, fontSize = 14.sp)
-                            Text("  Всего: ${format3(totals.goodKg + totals.defectKg)} кг", color = colors.muted, fontSize = 14.sp)
+                            Text("  Партия + брак: ${format3(totals.batchKg + totals.defectKg)} кг", color = colors.muted, fontSize = 14.sp)
                             Spacer(Modifier.height(5.dp))
                         }
                     }
 
                     Box(Modifier.fillMaxWidth().height(1.dp).background(colors.primary.copy(alpha = 0.35f)))
                     Spacer(Modifier.height(8.dp))
+                    Text("ОБЩАЯ ПАРТИЯ: ${fmt(totalBatchParts)} шт / ${format3(totalBatchKg)} кг", color = colors.primary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     Text("ОБЩИЙ ВЕС ГОТОВЫХ ИЗДЕЛИЙ: ${format3(totalGoodKg)} кг", color = colors.success, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                     Text("ОБЩИЙ ВЕС БРАКА: ${format3(totalDefectKg)} кг", color = colors.danger, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                    Text("ОБЩИЙ ВЕС: ${format3(totalWeight)} кг", color = colors.primary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("ВЕС ОБЩЕЙ ПАРТИИ + БРАК: ${format3(totalWeight + totalDefectKg)} кг", color = colors.primary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     Text("В отчёте: ${included.size} ТПА", color = colors.muted, fontSize = 13.sp)
                 }
             }
