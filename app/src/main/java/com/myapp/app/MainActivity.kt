@@ -1205,7 +1205,6 @@ private fun TpaCard(
             ) {
                 StatPill("ГОТОВО", "${fmt(totalGood)} шт", colors.success, colors)
                 StatPill("БРАК", "${fmt(totalDefect)} шт", colors.danger, colors)
-                StatPill("ВЕС 1 ТРУБЫ", "${format3(firstPartWeight)} г", colors.primary, colors)
                 StatPill("ПАРТИЯ", "${fmt(totalBatch)} шт / ${format3(batchWeightKg)} кг", colors.warning, colors)
             }
             Spacer(Modifier.height(9.dp))
