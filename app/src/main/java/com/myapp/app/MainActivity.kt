@@ -597,8 +597,7 @@ private fun PremiumTpaApp(context: Context) {
                     onClear = { history.clear() }
                 )
             }
-        }
-    }
+        }    }
 
     if (showSplash) {
         Box(Modifier.fillMaxSize().background(backgroundBrush(wallpaper, darkTheme)), contentAlignment = Alignment.Center) {
@@ -1049,8 +1048,7 @@ private fun TubeTpaCard(
     val defect = num(current.defect)
     val weight = weightGrams(current)
     val batch = num(current.batchTotal)
-    val totalBatch = batch + manufactured
-    val totalBatchKg = totalBatch * weight / 1000.0
+    val batchKg = batch * weight / 1000.0
 
     Card(
         shape = RoundedCornerShape(20.dp),
@@ -1088,7 +1086,7 @@ private fun TubeTpaCard(
                 StatPill("ИЗГОТОВЛЕНО", "${fmt(manufactured)} шт", colors.success, colors)
                 StatPill("БРАК", "${fmt(defect)} шт", colors.danger, colors)
                 StatPill("ВЕС 1 ТРУБЫ", "${format3(weight)} г", colors.primary, colors)
-                StatPill("ПАРТИЯ", "${fmt(totalBatch)} шт / ${format3(totalBatchKg)} кг", colors.warning, colors)
+                StatPill("ПАРТИЯ", "${fmt(batch)} шт / ${format3(batchKg)} кг", colors.warning, colors)
             }
             Spacer(Modifier.height(12.dp))
             NumberField(
@@ -1126,10 +1124,10 @@ private fun TubeTpaCard(
                     .border(1.dp, colors.warning.copy(alpha = 0.16f), RoundedCornerShape(15.dp))
             ) {
                 Column(Modifier.padding(10.dp)) {
-                    Text("Партия: ${fmt(totalBatch)} шт / ${format3(totalBatchKg)} кг",
+                    Text("Партия: ${fmt(batch)} шт / ${format3(batchKg)} кг",
                         color = colors.warning, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
                     NumberField(
-                        label = "▰  Количество в указанной партии (шт)",
+                        label = "▰  Партия (шт)",
                         value = current.batchTotal, modifier = Modifier.fillMaxWidth(),
                         keyboardType = KeyboardType.Number, colors = colors, labelColor = colors.warning
                     ) { onData(data.copy(parts = listOf(current.copy(batchTotal = it)))) }
@@ -1197,8 +1195,7 @@ private fun TpaCard(
             }
 
             Spacer(Modifier.height(12.dp))
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            Row(                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 StatPill("ГОТОВО", "${fmt(totalGood)} шт", colors.success, colors)
@@ -1741,8 +1738,7 @@ private fun ReportScreen(
                                 Text("Изготовлено труб: ${fmt(good)} шт / ${format3(goodKg)} кг", color = colors.success, fontSize = 15.sp)
                                 Text("Брак: ${fmt(defect)} шт / ${format3(defectKg)} кг", color = colors.danger, fontSize = 15.sp)
                                 Text("Вес 1 трубы: ${format3(weight)} г", color = colors.primary, fontSize = 14.sp)
-                                Text("Указанная партия: ${fmt(specifiedBatch)} шт / ${format3(specifiedBatchKg)} кг", color = colors.warning, fontSize = 14.sp)
-                                Text("Общая партия: ${fmt(totalBatch)} шт / ${format3(totalBatchWeightKg)} кг", color = colors.warning, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                Text("Партия: ${fmt(specifiedBatch)} шт / ${format3(specifiedBatchKg)} кг", color = colors.warning, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             } else {
                                 Text("Материал: ${part.material}", color = colors.muted, fontSize = 13.sp)
                                 Text("Указанная партия: ${fmt(specifiedBatch)} шт / ${format3(specifiedBatchKg)} кг", color = colors.warning, fontSize = 14.sp)
@@ -1797,8 +1793,7 @@ private fun TemplateDialog(
             Text(
                 if (archivedOnly) "Архив деталей" else "Шаблоны деталей",
                 color = colors.text,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold
+                fontSize = 20.sp,                fontWeight = FontWeight.Bold
             )
         },
         text = {
@@ -2043,8 +2038,7 @@ private fun buildReport(data: List<TpaData>): String {
                 lines += "   Изготовлено труб: ${fmt(good)} шт / ${format3(goodKg)} кг"
                 lines += "   Брак: ${fmt(defect)} шт / ${format3(defectKg)} кг"
                 lines += "   Вес 1 трубы: ${format3(weight)} г"
-                lines += "   Указанная партия: ${fmt(specifiedBatch)} шт / ${format3(specifiedBatchKg)} кг"
-                lines += "   Общая партия: ${fmt(totalBatch)} шт / ${format3(totalBatchKgPart)} кг"
+                lines += "   Партия: ${fmt(specifiedBatch)} шт / ${format3(specifiedBatchKg)} кг"
             } else {
                 lines += "   Материал: ${part.material}"
                 lines += "   Указанная партия: ${fmt(specifiedBatch)} шт / ${format3(specifiedBatchKg)} кг"
