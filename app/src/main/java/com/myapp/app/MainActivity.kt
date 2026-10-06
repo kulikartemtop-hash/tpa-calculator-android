@@ -1038,6 +1038,9 @@ private fun TpaCard(
 ) {
     val totalGood = data.parts.sumOf { num(it.perBox) * num(it.boxes) }
     val totalDefect = data.parts.sumOf { num(it.defect) }
+    val totalBatch = data.parts.sumOf { num(it.batchTotal) + num(it.perBox) * num(it.boxes) }
+    val batchWeightKg = data.parts.sumOf { (num(it.batchTotal) + num(it.perBox) * num(it.boxes)) * weightGrams(it) } / 1000.0
+    val firstPartWeight = data.parts.firstOrNull()?.let { weightGrams(it) } ?: 0.0
 
     Card(
         shape = RoundedCornerShape(20.dp),
@@ -1083,9 +1086,14 @@ private fun TpaCard(
             }
 
             Spacer(Modifier.height(12.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 StatPill("ГОТОВО", "${fmt(totalGood)} шт", colors.success, colors)
                 StatPill("БРАК", "${fmt(totalDefect)} шт", colors.danger, colors)
+                StatPill("ВЕС 1 ТРУБЫ", "${format3(firstPartWeight)} г", colors.primary, colors)
+                StatPill("ПАРТИЯ", "${fmt(totalBatch)} шт / ${format3(batchWeightKg)} кг", colors.warning, colors)
             }
             Spacer(Modifier.height(9.dp))
             Text(
@@ -1557,12 +1565,6 @@ private fun ReportScreen(
             if (parts.isNotEmpty()) index to tpa.copy(parts = parts) else null
         }
 
-    data class MaterialTotals(var batchKg: Double = 0.0, var goodKg: Double = 0.0, var defectKg: Double = 0.0)
-    val materialTotals = linkedMapOf<String, MaterialTotals>()
-    var totalGoodKg = 0.0
-    var totalDefectKg = 0.0
-    var totalBatchParts = 0.0
-    var totalBatchKg = 0.0
 
     included.forEach { (_, tpa) ->
         tpa.parts.forEach { part ->
@@ -1575,19 +1577,10 @@ private fun ReportScreen(
             val totalBatchWeightKg = totalBatch * weight / 1000.0
             val defectKg = defect * weight / 1000.0
 
-            totalGoodKg += goodKg
-            totalDefectKg += defectKg
-            totalBatchParts += totalBatch
-            totalBatchKg += totalBatchWeightKg
 
-            val totals = materialTotals.getOrPut(part.material) { MaterialTotals() }
-            totals.batchKg += totalBatchWeightKg
-            totals.goodKg += goodKg
-            totals.defectKg += defectKg
         }
     }
 
-    val totalWeight = totalBatchKg
 
     Column(
         Modifier
@@ -1633,9 +1626,9 @@ private fun ReportScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             Text("Материал: ${part.material}", color = colors.muted, fontSize = 13.sp)
-                            Text("Указанная партия: ${fmt(specifiedBatch)} шт / ${format3(specifiedBatchKg)} кг", color = colors.primary, fontSize = 14.sp)
+                            Text("Указанная партия: ${fmt(specifiedBatch)} шт / ${format3(specifiedBatchKg)} кг", color = colors.warning, fontSize = 14.sp)
                             Text("Готовые за смену: ${fmt(good)} шт / ${format3(goodKg)} кг", color = colors.success, fontSize = 15.sp)
-                            Text("Общая партия ТПА: ${fmt(totalBatch)} шт / ${format3(totalBatchWeightKg)} кг", color = colors.primary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Text("Общая партия ТПА: ${fmt(totalBatch)} шт / ${format3(totalBatchWeightKg)} кг", color = colors.warning, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             Text("Брак: ${fmt(defect)} шт / ${format3(defectKg)} кг", color = colors.danger, fontSize = 15.sp)
                             if (partIndex < tpa.parts.lastIndex) {
                                 Spacer(Modifier.height(8.dp))
@@ -1644,44 +1637,6 @@ private fun ReportScreen(
                             }
                         }
                     }
-                }
-            }
-
-            // Общий отчёт по смене.
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = colors.card),
-                modifier = Modifier.fillMaxWidth().border(1.dp, colors.border, RoundedCornerShape(20.dp))
-            ) {
-                Column(Modifier.padding(18.dp)) {
-                    Text("ИТОГОВЫЙ ОТЧЁТ", color = colors.primary, fontSize = 21.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    Text("Общая партия всех ТПА: ${fmt(totalBatchParts)} шт / ${format3(totalBatchKg)} кг", color = colors.primary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                    Text("Готовые детали за смену: ${format3(totalGoodKg)} кг", color = colors.success, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                    Text("Общий вес брака: ${format3(totalDefectKg)} кг", color = colors.danger, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-
-                    Spacer(Modifier.height(12.dp))
-                    Text("ПО МАТЕРИАЛАМ", color = colors.warning, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(6.dp))
-                    Materials.forEach { material ->
-                        val totals = materialTotals[material]
-                        if (totals != null && (totals.goodKg > 0.0 || totals.defectKg > 0.0)) {
-                            Text(material, color = colors.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                            Text("  Общая партия: ${format3(totals.batchKg)} кг", color = colors.primary, fontSize = 14.sp)
-                            Text("  Готовые за смену: ${format3(totals.goodKg)} кг", color = colors.success, fontSize = 14.sp)
-                            Text("  Брак: ${format3(totals.defectKg)} кг", color = colors.danger, fontSize = 14.sp)
-                            Text("  Партия + брак: ${format3(totals.batchKg + totals.defectKg)} кг", color = colors.muted, fontSize = 14.sp)
-                            Spacer(Modifier.height(5.dp))
-                        }
-                    }
-
-                    Box(Modifier.fillMaxWidth().height(1.dp).background(colors.primary.copy(alpha = 0.35f)))
-                    Spacer(Modifier.height(8.dp))
-                    Text("ОБЩАЯ ПАРТИЯ: ${fmt(totalBatchParts)} шт / ${format3(totalBatchKg)} кг", color = colors.primary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Text("ОБЩИЙ ВЕС ГОТОВЫХ ИЗДЕЛИЙ: ${format3(totalGoodKg)} кг", color = colors.success, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                    Text("ОБЩИЙ ВЕС БРАКА: ${format3(totalDefectKg)} кг", color = colors.danger, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                    Text("ВЕС ОБЩЕЙ ПАРТИИ + БРАК: ${format3(totalWeight + totalDefectKg)} кг", color = colors.primary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Text("В отчёте: ${included.size} ТПА", color = colors.muted, fontSize = 13.sp)
                 }
             }
 
