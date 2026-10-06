@@ -38,26 +38,3 @@ jobs:
         with:
           name: tpa-calculator-debug
           path: app/build/outputs/apk/debug/*.apk
-
-      - name: Prepare permanent signing keystore
-        if: ${{ secrets.TPA_KEYSTORE_BASE64 != '' }}
-        env:
-          TPA_KEYSTORE_BASE64: ${{ secrets.TPA_KEYSTORE_BASE64 }}
-        run: |
-          echo "$TPA_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/tpa-release.jks"
-
-      - name: Build signed release APK
-        if: ${{ secrets.TPA_KEYSTORE_BASE64 != '' }}
-        env:
-          TPA_KEYSTORE_PATH: ${{ runner.temp }}/tpa-release.jks
-          TPA_KEYSTORE_PASSWORD: ${{ secrets.TPA_KEYSTORE_PASSWORD }}
-          TPA_KEY_ALIAS: ${{ secrets.TPA_KEY_ALIAS }}
-          TPA_KEY_PASSWORD: ${{ secrets.TPA_KEY_PASSWORD }}
-        run: gradle assembleRelease --no-daemon
-
-      - name: Upload signed APK
-        if: ${{ secrets.TPA_KEYSTORE_BASE64 != '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: tpa-calculator-release
-          path: app/build/outputs/apk/release/*.apk
