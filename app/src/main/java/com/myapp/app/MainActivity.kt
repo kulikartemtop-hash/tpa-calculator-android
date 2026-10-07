@@ -3,14 +3,21 @@ package com.myapp.app
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,16 +59,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.geometry.Offset
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.delay
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -916,6 +929,7 @@ private fun CalculatorScreen(
 ) {
     var selectedTpa by remember { mutableStateOf(0) }
     var showTemplates by remember { mutableStateOf(false) }
+    var showScanner by remember { mutableStateOf(false) }
 
     Column(
         Modifier
@@ -931,6 +945,12 @@ private fun CalculatorScreen(
             onTemplates = { showTemplates = true },
             onUndo = onUndo,
             onToggleCompact = onToggleCompact
+        )
+
+        ActionButton(
+            text = "📷  Сканировать бланк",
+            colors = colors,
+            onClick = { showScanner = true }
         )
 
         TpaSelector(
@@ -969,6 +989,17 @@ private fun CalculatorScreen(
             danger = true,
             onClick = onReset
         )
+
+        if (showScanner) {
+            TpaScanDialog(
+                colors = colors,
+                onDismiss = { showScanner = false },
+                onAdd = { scanned ->
+                    onData(selectedTpa, data[selectedTpa].copy(parts = data[selectedTpa].parts + scanned))
+                    showScanner = false
+                }
+            )
+        }
 
         if (showTemplates) {
             TemplateDialog(
@@ -2076,6 +2107,222 @@ private fun ShareDialog(
         }
     )
 }
+
+enum class ScanField(val title: String) {
+    NAME("Название детали"),
+    BATCH("Общая партия"),
+    PER_BOX("Штук в коробке"),
+    WEIGHT("Вес детали")
+}
+
+@Composable
+private fun TpaScanDialog(
+    colors: AppColors,
+    onDismiss: () -> Unit,
+    onAdd: (PartData) -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var field by remember { mutableStateOf(ScanField.NAME) }
+    var selectionStart by remember { mutableStateOf<Offset?>(null) }
+    var selectionEnd by remember { mutableStateOf<Offset?>(null) }
+    var canvasSize by remember { mutableStateOf(IntSize.Zero) }
+    var name by remember { mutableStateOf("") }
+    var batch by remember { mutableStateOf("") }
+    var perBox by remember { mutableStateOf("") }
+    var weight by remember { mutableStateOf("") }
+    var status by remember { mutableStateOf("Выбери фото листка") }
+    var scanning by remember { mutableStateOf(false) }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        try {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                bitmap = BitmapFactory.decodeStream(input)
+            }
+            status = "Выбери поле и обведи его пальцем"
+            selectionStart = null
+            selectionEnd = null
+        } catch (_: Exception) {
+            status = "Не удалось открыть фото"
+        }
+    }
+
+    fun recognizeSelection() {
+        val bmp = bitmap ?: return
+        val start = selectionStart ?: return
+        val end = selectionEnd ?: return
+        if (canvasSize.width <= 0 || canvasSize.height <= 0) return
+        val left = kotlin.math.min(start.x, end.x).coerceIn(0f, canvasSize.width.toFloat())
+        val right = kotlin.math.max(start.x, end.x).coerceIn(0f, canvasSize.width.toFloat())
+        val top = kotlin.math.min(start.y, end.y).coerceIn(0f, canvasSize.height.toFloat())
+        val bottom = kotlin.math.max(start.y, end.y).coerceIn(0f, canvasSize.height.toFloat())
+        if (right - left < 12f || bottom - top < 12f) {
+            status = "Область слишком маленькая"
+            return
+        }
+        val scaleX = bmp.width.toFloat() / canvasSize.width.toFloat()
+        val scaleY = bmp.height.toFloat() / canvasSize.height.toFloat()
+        val cropLeft = (left * scaleX).toInt().coerceIn(0, bmp.width - 1)
+        val cropTop = (top * scaleY).toInt().coerceIn(0, bmp.height - 1)
+        val cropRight = (right * scaleX).toInt().coerceIn(cropLeft + 1, bmp.width)
+        val cropBottom = (bottom * scaleY).toInt().coerceIn(cropTop + 1, bmp.height)
+        val crop = Bitmap.createBitmap(bmp, cropLeft, cropTop, cropRight - cropLeft, cropBottom - cropTop)
+        scanning = true
+        status = "Распознаю…"
+        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        recognizer.process(InputImage.fromBitmap(crop, 0))
+            .addOnSuccessListener { result ->
+                val raw = result.text.replace("\n", " ").trim()
+                when (field) {
+                    ScanField.NAME -> name = raw
+                    ScanField.BATCH -> batch = firstInteger(raw)
+                    ScanField.PER_BOX -> perBox = firstInteger(raw)
+                    ScanField.WEIGHT -> weight = firstDecimal(raw)
+                }
+                status = if (raw.isBlank()) "Ничего не распознано — попробуй обвести точнее" else "Готово: " + raw
+                scanning = false
+                recognizer.close()
+            }
+            .addOnFailureListener { e ->
+                status = "Ошибка распознавания: " + (e.message ?: "повтори")
+                scanning = false
+                recognizer.close()
+            }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("📷 Сканирование бланка") },
+        text = {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("Выбери фото, затем поле и обведи его пальцем.", color = colors.muted, fontSize = 12.sp)
+                Button(onClick = { picker.launch("image/*") }, enabled = !scanning) {
+                    Text(if (bitmap == null) "Выбрать фото" else "Выбрать другое фото")
+                }
+                if (bitmap != null) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.horizontalScroll(rememberScrollState())
+                    ) {
+                        ScanField.values().forEach { f ->
+                            CompactActionButton(
+                                if (field == f) "✓ " + f.title else f.title,
+                                colors,
+                                { field = f },
+                                Modifier.width(130.dp)
+                            )
+                        }
+                    }
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(bitmap!!.width.toFloat() / bitmap!!.height.toFloat())
+                            .onSizeChanged { canvasSize = it }
+                            .pointerInput(field, bitmap) {
+                                detectDragGestures(
+                                    onDragStart = { selectionStart = it; selectionEnd = it },
+                                    onDrag = { change, _ ->
+                                        change.consume()
+                                        selectionEnd = change.position
+                                    },
+                                    onDragEnd = { status = "Нажми «Распознать»" }
+                                )
+                            }
+                    ) {
+                        Image(bitmap!!.asImageBitmap(), null, Modifier.fillMaxSize())
+                        Canvas(Modifier.fillMaxSize()) {
+                            val a = selectionStart
+                            val b = selectionEnd
+                            if (a != null && b != null) {
+                                val l = kotlin.math.min(a.x, b.x)
+                                val t = kotlin.math.min(a.y, b.y)
+                                val w = kotlin.math.abs(a.x - b.x)
+                                val h = kotlin.math.abs(a.y - b.y)
+                                drawRect(
+                                    Color(0xFFFF8A00).copy(alpha = 0.16f),
+                                    topLeft = Offset(l, t),
+                                    size = androidx.compose.ui.geometry.Size(w, h)
+                                )
+                                drawRect(
+                                    Color(0xFFFF8A00),
+                                    topLeft = Offset(l, t),
+                                    size = androidx.compose.ui.geometry.Size(w, h),
+                                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 4f)
+                                )
+                            }
+                        }
+                    }
+                    Button(
+                        onClick = { recognizeSelection() },
+                        enabled = !scanning && selectionStart != null && selectionEnd != null,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (scanning) "Распознаю…" else "Распознать выделенное")
+                    }
+                    Text(status, color = colors.muted, fontSize = 12.sp)
+                    OutlinedTextField(
+                        name,
+                        { name = it },
+                        label = { Text("Название") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        batch,
+                        { batch = it.filter(Char::isDigit) },
+                        label = { Text("Общая партия, шт") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        perBox,
+                        { perBox = it.filter(Char::isDigit) },
+                        label = { Text("Штук в коробке") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        weight,
+                        { weight = it.replace(',', '.').filter { c -> c.isDigit() || c == '.' } },
+                        label = { Text("Вес детали, г") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onAdd(
+                        PartData(
+                            name = name.trim(),
+                            perBox = perBox,
+                            weight = weight,
+                            batchTotal = batch
+                        )
+                    )
+                },
+                enabled = name.isNotBlank() || batch.isNotBlank() || perBox.isNotBlank() || weight.isNotBlank()
+            ) {
+                Text("Добавить в ТПА", color = colors.primary, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Закрыть") }
+        }
+    )
+}
+
+private fun firstInteger(text: String): String =
+    Regex("\\d{1,8}").find(text.replace(" ", ""))?.value ?: ""
+
+private fun firstDecimal(text: String): String =
+    Regex("\\d+(?:[.,]\\d+)?").find(text.replace("О", "0").replace("о", "0"))?.value?.replace(",", ".") ?: ""
 
 private fun buildReport(data: List<TpaData>): String {
     val date = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date())
