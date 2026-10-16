@@ -76,6 +76,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.net.URL
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
@@ -187,6 +190,9 @@ private fun PremiumTpaApp(context: Context) {
     var dirty by remember { mutableStateOf(false) }
     var saveMessage by remember { mutableStateOf("") }
     var showExit by remember { mutableStateOf(false) }
+    var showUpdateDialog by remember { mutableStateOf(false) }
+    var updateVersion by remember { mutableStateOf("") }
+    var updateUrl by remember { mutableStateOf("https://github.com/kulikartemtop-hash/tpa-calculator-android/releases") }
 
     val materialPrices = remember {
         mutableStateMapOf<String, String>().also { map ->
@@ -434,6 +440,34 @@ private fun PremiumTpaApp(context: Context) {
         showSplash = false
     }
 
+    // Проверяем опубликованный релиз GitHub при запуске. Обновление устанавливается
+    // только после подтверждения пользователя системой Android.
+    LaunchedEffect(Unit) {
+        val latest = withContext(Dispatchers.IO) {
+            runCatching {
+                val connection = URL("https://api.github.com/repos/kulikartemtop-hash/tpa-calculator-android/releases/latest")
+                    .openConnection()
+                connection.connectTimeout = 5000
+                connection.readTimeout = 5000
+                connection.setRequestProperty("Accept", "application/vnd.github+json")
+                val body = connection.getInputStream().bufferedReader().use { it.readText() }
+                JSONObject(body)
+            }.getOrNull()
+        }
+        if (latest != null) {
+            val remoteVersion = latest.optString("tag_name").removePrefix("v")
+            val releasePage = latest.optString("html_url")
+            val currentVersion = runCatching {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.1"
+            }.getOrDefault("1.1")
+            if (remoteVersion.isNotBlank() && compareVersions(remoteVersion, currentVersion) > 0) {
+                updateVersion = remoteVersion
+                updateUrl = releasePage.ifBlank { "https://github.com/kulikartemtop-hash/tpa-calculator-android/releases" }
+                showUpdateDialog = true
+            }
+        }
+    }
+
     BackHandler(enabled = dirty) { showExit = true }
 
     val colors = if (darkTheme) {
@@ -679,6 +713,25 @@ private fun PremiumTpaApp(context: Context) {
                 TextButton(onClick = { showReset = false }) {
                     Text("Нет", color = colors.primary, fontWeight = FontWeight.Bold)
                 }
+            }
+        )
+    }
+
+    if (showUpdateDialog) {
+        AlertDialog(
+            onDismissRequest = { showUpdateDialog = false },
+            title = { Text("Доступно обновление") },
+            text = { Text("Найдена новая версия TPA Premium: $updateVersion. Откроется страница загрузки APK. Для установки Android попросит подтверждение.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(updateUrl)))
+                    }
+                    showUpdateDialog = false
+                }) { Text("Скачать обновление") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUpdateDialog = false }) { Text("Позже") }
             }
         )
     }
@@ -2320,6 +2373,19 @@ private fun formatWeightInput(value: Double): String {
     if (!value.isFinite()) return ""
     val rounded = kotlin.math.round(value * 1000.0) / 1000.0
     return if (rounded == rounded.toLong().toDouble()) rounded.toLong().toString() else rounded.toString().trimEnd('0').trimEnd('.')
+}
+
+private fun compareVersions(a: String, b: String): Int {
+    fun parts(value: String): List<Int> =
+        value.substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 }
+    val left = parts(a)
+    val right = parts(b)
+    for (i in 0 until maxOf(left.size, right.size)) {
+        val x = left.getOrElse(i) { 0 }
+        val y = right.getOrElse(i) { 0 }
+        if (x != y) return x.compareTo(y)
+    }
+    return 0
 }
 
 private fun normalizeLegacyWeight(value: String, unit: String): String {
