@@ -33,6 +33,18 @@ jobs:
         with:
           gradle-version: '9.4.1'
 
+      - name: Detect release signing secrets
+        id: signing
+        env:
+          TPA_KEYSTORE_BASE64: ${{ secrets.TPA_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$TPA_KEYSTORE_BASE64" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Release publishing is skipped: permanent signing secrets are not configured."
+          fi
+
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
 
@@ -43,13 +55,13 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
 
       - name: Set release version
-        if: ${{ secrets.TPA_KEYSTORE_BASE64 != '' }}
+        if: steps.signing.outputs.enabled == 'true'
         run: |
           echo "TPA_VERSION_CODE=$((GITHUB_RUN_NUMBER + 2))" >> "$GITHUB_ENV"
           echo "TPA_VERSION_NAME=1.2.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
 
       - name: Prepare permanent release signing key
-        if: ${{ secrets.TPA_KEYSTORE_BASE64 != '' }}
+        if: steps.signing.outputs.enabled == 'true'
         env:
           TPA_KEYSTORE_BASE64: ${{ secrets.TPA_KEYSTORE_BASE64 }}
         run: |
@@ -58,7 +70,7 @@ jobs:
           echo "TPA_KEYSTORE_PATH=$RUNNER_TEMP/tpa-release.jks" >> "$GITHUB_ENV"
 
       - name: Build signed release APK
-        if: ${{ secrets.TPA_KEYSTORE_BASE64 != '' }}
+        if: steps.signing.outputs.enabled == 'true'
         env:
           TPA_KEYSTORE_PASSWORD: ${{ secrets.TPA_KEYSTORE_PASSWORD }}
           TPA_KEY_ALIAS: ${{ secrets.TPA_KEY_ALIAS }}
@@ -66,14 +78,14 @@ jobs:
         run: gradle assembleRelease --no-daemon
 
       - name: Upload signed release APK
-        if: ${{ secrets.TPA_KEYSTORE_BASE64 != '' }}
+        if: steps.signing.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: tpa-calculator-release
           path: app/build/outputs/apk/release/*.apk
 
       - name: Publish release for in-app update checks
-        if: ${{ secrets.TPA_KEYSTORE_BASE64 != '' }}
+        if: steps.signing.outputs.enabled == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.2.${{ github.run_number }}
