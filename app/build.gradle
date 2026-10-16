@@ -13,8 +13,8 @@ android {
         applicationId "com.myapp.app"
         minSdk 24
         targetSdk 36
-        versionCode (System.getenv("TPA_VERSION_CODE") ?: "2").toInteger()
-        versionName (System.getenv("TPA_VERSION_NAME") ?: "1.1")
+        versionCode = (System.getenv("TPA_VERSION_CODE") ?: "2").toInteger()
+        versionName = (System.getenv("TPA_VERSION_NAME") ?: "1.1")
     }
 
     signingConfigs {
