@@ -217,8 +217,8 @@ private fun PremiumTpaApp(context: Context) {
                                 perBox = o.optString("perBox"),
                                 boxes = o.optString("boxes"),
                                 defect = o.optString("defect"),
-                                weight = o.optString("weight"),
-                                weightUnit = o.optString("weightUnit", "г"),
+                                weight = normalizeLegacyWeight(o.optString("weight"), o.optString("weightUnit", "г")),
+                                weightUnit = "г",
                                 batchTotal = o.optString("batchTotal"),
                                 archived = o.optBoolean("archived", false)
                             )
@@ -249,8 +249,8 @@ private fun PremiumTpaApp(context: Context) {
                                         perBox = part.optString("perBox"),
                                         boxes = part.optString("boxes"),
                                         defect = part.optString("defect"),
-                                        weight = part.optString("weight"),
-                                        weightUnit = part.optString("weightUnit", "г"),
+                                        weight = normalizeLegacyWeight(part.optString("weight"), part.optString("weightUnit", "г")),
+                                        weightUnit = "г",
                                         batchTotal = part.optString("batchTotal")
                                     )
                                 )
@@ -263,8 +263,8 @@ private fun PremiumTpaApp(context: Context) {
                                     perBox = o.optString("perBox"),
                                     boxes = o.optString("boxes"),
                                     defect = o.optString("defect"),
-                                    weight = o.optString("weight"),
-                                    weightUnit = o.optString("weightUnit", "г"),
+                                    weight = normalizeLegacyWeight(o.optString("weight"), o.optString("weightUnit", "г")),
+                                    weightUnit = "г",
                                     batchTotal = o.optString("batchTotal")
                                 )
                             )
@@ -352,7 +352,7 @@ private fun PremiumTpaApp(context: Context) {
                                 put("boxes", part.boxes)
                                 put("defect", part.defect)
                                 put("weight", part.weight)
-                                put("weightUnit", part.weightUnit)
+                                put("weightUnit", "г")
                                 put("batchTotal", part.batchTotal)
                             }
                         )
@@ -402,7 +402,7 @@ private fun PremiumTpaApp(context: Context) {
                     put("boxes", template.boxes)
                     put("defect", template.defect)
                     put("weight", template.weight)
-                    put("weightUnit", template.weightUnit)
+                    put("weightUnit", "г")
                     put("batchTotal", template.batchTotal)
                     put("archived", template.archived)
                 }
@@ -539,8 +539,8 @@ private fun PremiumTpaApp(context: Context) {
                             perBox = template.perBox,
                             boxes = template.boxes,
                             defect = template.defect,
-                            weight = template.weight,
-                            weightUnit = template.weightUnit,
+                            weight = normalizeLegacyWeight(template.weight, template.weightUnit),
+                            weightUnit = "г",
                             batchTotal = template.batchTotal
                         )
                         data[selected] = data[selected].copy(parts = updated)
@@ -1139,24 +1139,11 @@ private fun TubeTpaCard(
                 value = current.defect, modifier = Modifier.fillMaxWidth(),
                 keyboardType = KeyboardType.Number, colors = colors, labelColor = colors.danger
             ) { onData(data.copy(parts = listOf(current.copy(defect = it)))) }
-            Box {
-                NumberField(
-                    label = if (current.weightUnit == "кг") "Вес 1 трубы (кг)" else "Вес 1 трубы (г)",
-                    value = current.weight, modifier = Modifier.fillMaxWidth(),
-                    keyboardType = KeyboardType.Decimal, colors = colors
-                ) { onData(data.copy(parts = listOf(current.copy(weight = it)))) }
-                UnitToggle(
-                    value = current.weightUnit, colors = colors,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(top = 1.dp, end = 7.dp)
-                ) { newUnit ->
-                    if (newUnit == current.weightUnit) onData(data)
-                    else {
-                        val value = num(current.weight)
-                        val converted = if (newUnit == "кг") value / 1000.0 else value * 1000.0
-                        onData(data.copy(parts = listOf(current.copy(weightUnit = newUnit, weight = formatWeightInput(converted)))))
-                    }
-                }
-            }
+            NumberField(
+                label = "Вес 1 трубы (г)",
+                value = current.weight, modifier = Modifier.fillMaxWidth(),
+                keyboardType = KeyboardType.Decimal, colors = colors
+            ) { onData(data.copy(parts = listOf(current.copy(weight = it, weightUnit = "г")))) }
             Card(
                 shape = RoundedCornerShape(15.dp),
                 colors = CardDefaults.cardColors(containerColor = colors.field.copy(alpha = 0.55f)),
@@ -1402,29 +1389,13 @@ private fun PartEditor(
             labelColor = colors.danger
         ) { onChange(part.copy(defect = it)) }
 
-        Box(Modifier.weight(1f)) {
-            NumberField(
-                label = if (part.weightUnit == "кг") "Вес (кг)" else "Вес (г)",
-                value = part.weight,
-                modifier = Modifier.fillMaxWidth(),
-                keyboardType = KeyboardType.Decimal,
-                colors = colors
-            ) { onChange(part.copy(weight = it)) }
-
-            UnitToggle(
-                value = part.weightUnit,
-                colors = colors,
-                modifier = Modifier.align(Alignment.TopEnd).padding(top = 1.dp, end = 7.dp)
-            ) { newUnit ->
-                if (newUnit == part.weightUnit) {
-                    onChange(part)
-                } else {
-                    val current = num(part.weight)
-                    val converted = if (newUnit == "кг") current / 1000.0 else current * 1000.0
-                    onChange(part.copy(weightUnit = newUnit, weight = formatWeightInput(converted)))
-                }
-            }
-        }
+        NumberField(
+            label = "Вес (г)",
+            value = part.weight,
+            modifier = Modifier.weight(1f),
+            keyboardType = KeyboardType.Decimal,
+            colors = colors
+        ) { onChange(part.copy(weight = it, weightUnit = "г")) }
     }
 
     Card(
@@ -1512,31 +1483,6 @@ private fun MaterialDropdown(
     }
 
     Spacer(Modifier.height(8.dp))
-}
-
-@Composable
-private fun UnitToggle(
-    value: String,
-    colors: AppColors,
-    modifier: Modifier = Modifier,
-    onChange: (String) -> Unit
-) {
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(colors.card.copy(alpha = 0.75f))
-            .border(1.dp, colors.border.copy(alpha = 0.7f), RoundedCornerShape(10.dp))
-    ) {
-        listOf("г", "кг").forEach { unit ->
-            Box(
-                modifier = Modifier
-                    .clickable { onChange(unit) }
-                    .background(if (value == unit) colors.primary.copy(alpha = 0.28f) else Color.Transparent)
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                contentAlignment = Alignment.Center
-            ) { Text(unit, color = if (value == unit) colors.primary else colors.muted, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
-        }
-    }
 }
 
 @Composable
@@ -2376,7 +2322,12 @@ private fun formatWeightInput(value: Double): String {
     return if (rounded == rounded.toLong().toDouble()) rounded.toLong().toString() else rounded.toString().trimEnd('0').trimEnd('.')
 }
 
-private fun weightGrams(part: PartData): Double = if (part.weightUnit == "кг") num(part.weight) * 1000.0 else num(part.weight)
+private fun normalizeLegacyWeight(value: String, unit: String): String {
+    val parsed = num(value)
+    return if (unit == "кг" && parsed > 0.0) formatWeightInput(parsed * 1000.0) else value
+}
+
+private fun weightGrams(part: PartData): Double = num(part.weight)
 
 private fun partHasData(part: PartData): Boolean =
     part.name.isNotBlank() ||
