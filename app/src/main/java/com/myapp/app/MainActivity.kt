@@ -1428,7 +1428,7 @@ private fun PartEditor(
         NumberField(
             label = "▦  Готовые: шт. в кор.",
             value = part.perBox,
-            modifier = Modifier.weight(1f).padding(top = 8.dp),
+            modifier = Modifier.weight(0.9f).padding(top = 8.dp),
             keyboardType = KeyboardType.Number,
             colors = colors,
             labelColor = colors.success
@@ -1437,7 +1437,7 @@ private fun PartEditor(
         BoxCountField(
             value = part.boxes,
             colors = colors,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1.1f),
             onChange = { onChange(part.copy(boxes = it)) }
         )
     }
@@ -1572,7 +1572,7 @@ private fun BoxCountField(value: String, colors: AppColors, modifier: Modifier, 
             onChange((num(value) - 1.0).coerceAtLeast(0.0).let { if (it == 0.0) "" else it.toLong().toString() })
         }
         NumberField(
-            label = "▦  Готовые: кол-во кор.",
+            label = "Коробки",
             value = value,
             modifier = Modifier.weight(1f),
             keyboardType = KeyboardType.Number,
