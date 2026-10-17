@@ -7,6 +7,13 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import java.io.FileOutputStream
+import java.io.File
+import androidx.core.content.FileProvider
+import android.provider.Settings
+import android.os.Build
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -194,7 +201,11 @@ private fun PremiumTpaApp(context: Context) {
     var showExit by remember { mutableStateOf(false) }
     var showUpdateDialog by remember { mutableStateOf(false) }
     var updateVersion by remember { mutableStateOf("") }
-    var updateUrl by remember { mutableStateOf("https://github.com/kulikartemtop-hash/tpa-calculator-android/releases") }
+    var updateUrl by remember { mutableStateOf("") }
+    var updateDownloading by remember { mutableStateOf(false) }
+    var updateStatus by remember { mutableStateOf("") }
+    var downloadedUpdate by remember { mutableStateOf<File?>(null) }
+    val updateScope = rememberCoroutineScope()
 
     val materialPrices = remember {
         mutableStateMapOf<String, String>().also { map ->
@@ -442,15 +453,13 @@ private fun PremiumTpaApp(context: Context) {
         showSplash = false
     }
 
-    // Проверяем опубликованный релиз GitHub при запуске. Обновление устанавливается
-    // только после подтверждения пользователя системой Android.
+    // Проверяем последний релиз и получаем прямую ссылку на APK.
     LaunchedEffect(Unit) {
         val latest = withContext(Dispatchers.IO) {
             runCatching {
-                val connection = URL("https://api.github.com/repos/kulikartemtop-hash/tpa-calculator-android/releases/latest")
-                    .openConnection()
-                connection.connectTimeout = 5000
-                connection.readTimeout = 5000
+                val connection = URL("https://api.github.com/repos/kulikartemtop-hash/tpa-calculator-android/releases/latest").openConnection()
+                connection.connectTimeout = 8000
+                connection.readTimeout = 8000
                 connection.setRequestProperty("Accept", "application/vnd.github+json")
                 val body = connection.getInputStream().bufferedReader().use { it.readText() }
                 JSONObject(body)
@@ -458,13 +467,23 @@ private fun PremiumTpaApp(context: Context) {
         }
         if (latest != null) {
             val remoteVersion = latest.optString("tag_name").removePrefix("v")
-            val releasePage = latest.optString("html_url")
+            val assets = latest.optJSONArray("assets")
+            var apkUrl = ""
+            if (assets != null) {
+                for (i in 0 until assets.length()) {
+                    val asset = assets.optJSONObject(i) ?: continue
+                    if (asset.optString("name").endsWith(".apk", ignoreCase = true)) {
+                        apkUrl = asset.optString("browser_download_url")
+                        break
+                    }
+                }
+            }
             val currentVersion = runCatching {
                 context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.1"
             }.getOrDefault("1.1")
-            if (remoteVersion.isNotBlank() && compareVersions(remoteVersion, currentVersion) > 0) {
+            if (remoteVersion.isNotBlank() && apkUrl.isNotBlank() && compareVersions(remoteVersion, currentVersion) > 0) {
                 updateVersion = remoteVersion
-                updateUrl = releasePage.ifBlank { "https://github.com/kulikartemtop-hash/tpa-calculator-android/releases" }
+                updateUrl = apkUrl
                 showUpdateDialog = true
             }
         }
@@ -729,19 +748,81 @@ private fun PremiumTpaApp(context: Context) {
 
     if (showUpdateDialog) {
         AlertDialog(
-            onDismissRequest = { showUpdateDialog = false },
+            onDismissRequest = { if (!updateDownloading) showUpdateDialog = false },
             title = { Text("Доступно обновление") },
-            text = { Text("Найдена новая версия TPA Premium: $updateVersion. Откроется страница загрузки APK. Для установки Android попросит подтверждение.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    runCatching {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(updateUrl)))
+            text = {
+                Column {
+                    Text("Найдена новая версия TPA Premium: $updateVersion.")
+                    if (updateStatus.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(updateStatus, color = colors.muted)
                     }
-                    showUpdateDialog = false
-                }) { Text("Скачать обновление") }
+                    if (updateDownloading) {
+                        Spacer(Modifier.height(10.dp))
+                        androidx.compose.material3.LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !updateDownloading,
+                    onClick = {
+                        val apkFile = downloadedUpdate
+                        if (apkFile != null && apkFile.exists()) {
+                            val canInstall = Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+                                context.packageManager.canRequestPackageInstalls()
+                            if (!canInstall) {
+                                updateStatus = "Разреши установку из этого источника в настройках Android, затем вернись сюда и нажми «Установить»."
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + context.packageName))
+                                    )
+                                }
+                            } else {
+                                runCatching {
+                                    val apkUri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", apkFile)
+                                    val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                                        setDataAndType(apkUri, "application/vnd.android.package-archive")
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    context.startActivity(installIntent)
+                                }.onFailure { updateStatus = "Не удалось открыть установщик: ${it.message ?: "ошибка"}" }
+                            }
+                        } else {
+                            updateDownloading = true
+                            updateStatus = "Загрузка APK…"
+                            updateScope.launch {
+                                val result = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        val connection = URL(updateUrl).openConnection()
+                                        connection.connectTimeout = 15000
+                                        connection.readTimeout = 30000
+                                        connection.setRequestProperty("User-Agent", "TPA-Premium-Android")
+                                        val temp = File(context.cacheDir, "tpa-premium-update.apk")
+                                        connection.getInputStream().use { input ->
+                                            FileOutputStream(temp).use { output -> input.copyTo(output) }
+                                        }
+                                        if (!temp.exists() || temp.length() < 100_000L) {
+                                            temp.delete()
+                                            error("Загруженный APK неполный")
+                                        }
+                                        temp
+                                    }
+                                }
+                                updateDownloading = false
+                                result.onSuccess { file ->
+                                    downloadedUpdate = file
+                                    updateStatus = "Загрузка завершена. Нажми «Установить»."
+                                }.onFailure { error ->
+                                    updateStatus = "Не удалось скачать обновление. Проверь интернет и попробуй ещё раз. ${error.message ?: ""}"
+                                }
+                            }
+                        }
+                    }
+                ) { Text(if (updateDownloading) "Загрузка…" else if (downloadedUpdate != null) "Установить" else "Скачать и установить") }
             },
             dismissButton = {
-                TextButton(onClick = { showUpdateDialog = false }) { Text("Позже") }
+                TextButton(onClick = { if (!updateDownloading) showUpdateDialog = false }) { Text("Позже") }
             }
         )
     }
