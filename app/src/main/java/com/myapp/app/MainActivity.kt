@@ -639,7 +639,7 @@ private fun PremiumTpaApp(context: Context) {
                         data.forEachIndexed { index, d ->
                             if (d.enabled) {
                                 d.parts.forEach { part ->
-                                    val good = if (index == TpaNames.lastIndex) num(part.perBox) else num(part.perBox) * num(part.boxes)
+                                    val good = goodCount(part, index == TpaNames.lastIndex)
                                     val defect = num(part.defect)
                                     if (partHasData(part) && (good > 0 || defect > 0)) {
                                         entries.add(
@@ -1319,8 +1319,8 @@ private fun TpaCard(
 ) {
     val totalGood = data.parts.sumOf { num(it.perBox) * num(it.boxes) }
     val totalDefect = data.parts.sumOf { num(it.defect) }
-    val totalBatch = data.parts.sumOf { num(it.batchTotal) + num(it.perBox) * num(it.boxes) }
-    val batchWeightKg = data.parts.sumOf { (num(it.batchTotal) + num(it.perBox) * num(it.boxes)) * weightGrams(it) } / 1000.0
+    val totalBatch = data.parts.sumOf { totalBatchCount(it, goodCount(it)) }
+    val batchWeightKg = data.parts.sumOf { totalBatchCount(it, goodCount(it)) * weightGrams(it) } / 1000.0
     val firstPartWeight = data.parts.firstOrNull()?.let { weightGrams(it) } ?: 0.0
 
     Card(
@@ -1549,8 +1549,8 @@ private fun PartEditor(
         modifier = Modifier.fillMaxWidth().padding(top = 4.dp).border(1.dp, colors.warning.copy(alpha = 0.16f), RoundedCornerShape(15.dp))
     ) {
         Column(Modifier.padding(10.dp)) {
-            val good = num(part.perBox) * num(part.boxes)
-            val batch = num(part.batchTotal) + good
+            val good = goodCount(part)
+            val batch = totalBatchCount(part, good)
             Text(
                 "Партия: ${fmt(batch)} шт / ${kg(batch, weightGrams(part))} кг",
                 color = colors.warning,
@@ -1808,7 +1808,7 @@ private fun ReportScreen(
         tpa.parts.forEach { part ->
             val specifiedBatch = num(part.batchTotal)
             val good = num(part.perBox) * num(part.boxes)
-            val totalBatch = specifiedBatch + good
+            val totalBatch = totalBatchCount(part, good)
             val defect = num(part.defect)
             val weight = weightGrams(part)
             val goodKg = good * weight / 1000.0
@@ -1824,7 +1824,7 @@ private fun ReportScreen(
     // Указанная партия / общая партия ТПА сюда намеренно не попадают.
     val overallGoodKg = included.sumOf { (index, tpa) ->
         tpa.parts.sumOf { part ->
-            val good = if (index == TpaNames.lastIndex) num(part.perBox) else num(part.perBox) * num(part.boxes)
+            val good = goodCount(part, index == TpaNames.lastIndex)
             good * weightGrams(part) / 1000.0
         }
     }
@@ -1835,7 +1835,7 @@ private fun ReportScreen(
     val materialTotals = linkedMapOf<String, DoubleArray>()
     included.forEach { (index, tpa) ->
         tpa.parts.forEach { part ->
-            val good = if (index == TpaNames.lastIndex) num(part.perBox) else num(part.perBox) * num(part.boxes)
+            val good = goodCount(part, index == TpaNames.lastIndex)
             val defect = num(part.defect)
             val weight = weightGrams(part)
             val totals = materialTotals.getOrPut(part.material) { doubleArrayOf(0.0, 0.0, 0.0, 0.0) }
@@ -1875,8 +1875,8 @@ private fun ReportScreen(
                         tpa.parts.forEachIndexed { partIndex, part ->
                             val isTube = index == TpaNames.lastIndex
                             val specifiedBatch = num(part.batchTotal)
-                            val good = if (isTube) num(part.perBox) else num(part.perBox) * num(part.boxes)
-                            val totalBatch = specifiedBatch + good
+                            val good = goodCount(part, isTube)
+                            val totalBatch = totalBatchCount(part, good)
                             val defect = num(part.defect)
                             val weight = weightGrams(part)
                             val specifiedBatchKg = specifiedBatch * weight / 1000.0
@@ -2435,8 +2435,8 @@ private fun buildReport(data: List<TpaData>): String {
         reportParts.forEachIndexed { partIndex, part ->
             val isTube = index == TpaNames.lastIndex
             val specifiedBatch = num(part.batchTotal)
-            val good = if (isTube) num(part.perBox) else num(part.perBox) * num(part.boxes)
-            val totalBatch = specifiedBatch + good
+            val good = goodCount(part, isTube)
+            val totalBatch = totalBatchCount(part, good)
             val defect = num(part.defect)
             val weight = weightGrams(part)
             val specifiedBatchKg = specifiedBatch * weight / 1000.0
@@ -2486,6 +2486,15 @@ private fun normalizeLegacyWeight(value: String, unit: String): String {
 }
 
 private fun weightGrams(part: PartData): Double = num(part.weight)
+
+// Единные правила расчёта для карточек, отчёта, материалов и истории.
+// Для обычных ТПА и «Малыша» выпуск = штук в коробке × число коробок.
+// Для «Труб» количество изделий вводится напрямую.
+private fun goodCount(part: PartData, isTube: Boolean = false): Double =
+    if (isTube) num(part.perBox) else num(part.perBox) * num(part.boxes)
+
+private fun totalBatchCount(part: PartData, good: Double = goodCount(part)): Double =
+    num(part.batchTotal) + good
 
 private fun partHasData(part: PartData): Boolean =
     part.name.isNotBlank() ||
